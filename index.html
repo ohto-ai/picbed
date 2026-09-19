@@ -1012,17 +1012,15 @@ h1 { margin: 0; font-size: 20px; }
     del.title = '删除相册及其全部图片';
     del.onclick = async (e) => {
       e.stopPropagation();
-      const keys = await listAllKeys(prefix);
-      const files = keys.filter((k) => !k.endsWith('/'));
-      if (!files.length) {
-        if (keys.includes(prefix)) { await deleteKeysP([prefix]); toast('相册已删除'); loadGallery(true); }
-        else toast('相册为空');
-        return;
-      }
-      if (!confirm(`确定删除相册「${name}」？将删除其中 ${files.length} 张图片，不可恢复！`)) return;
       try {
-        await deleteKeysP(files);
-        if (keys.includes(prefix)) await deleteKeysP([prefix]);
+        const keys = await listAllKeys(prefix);
+        if (!keys.length) return toast('相册为空');
+        const files = keys.filter((k) => !k.endsWith('/'));
+        // 子相册（含空相册）也有零字节标记对象，必须一并删除，否则父相册删不掉
+        const subAlbums = keys.filter((k) => k.endsWith('/') && k !== prefix).length;
+        const extra = subAlbums ? ` 和 ${subAlbums} 个子相册` : '';
+        if (!confirm(`确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`)) return;
+        await deleteKeysP(keys); // 文件 + 本相册标记 + 全部子相册标记
         toast('相册已删除');
         loadGallery(true);
       } catch (err) {
@@ -1038,17 +1036,27 @@ h1 { margin: 0; font-size: 20px; }
   async function moveFolder(oldPrefix, newPrefix) {
     if (!newPrefix || newPrefix === oldPrefix) return;
     const keys = await listAllKeys(oldPrefix);
+    if (!keys.length) return toast('相册为空');
     const files = keys.filter((k) => !k.endsWith('/'));
+    // 子相册标记（含空相册）也要一起搬走，否则旧相册会残留在父目录
+    const markers = keys.filter((k) => k.endsWith('/') && k !== oldPrefix);
     const pairs = files.map((k) => ({ key: k, targetKey: newPrefix + k.slice(oldPrefix.length) }));
     const { action, map } = await resolveCollisions(pairs);
     if (action === 'cancel') return toast('已取消');
+    const total = pairs.length + markers.length;
+    let done = 0;
     try {
-      for (let i = 0; i < pairs.length; i++) {
-        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
-        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
+      for (const p of pairs) {
+        await copyP(p.key, map[p.targetKey] || p.targetKey);
+        done++;
+        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
       }
-      await deleteKeysP(files);
-      if (keys.includes(oldPrefix)) await deleteKeysP([oldPrefix]);
+      for (const m of markers) {
+        await putP(newPrefix + m.slice(oldPrefix.length), '');
+        done++;
+        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
+      }
+      await deleteKeysP(keys); // 文件 + 旧相册标记 + 子相册旧标记
       await putP(newPrefix, '');
       toast('重命名完成');
       loadGallery(true);
