@@ -251,6 +251,10 @@ h1 { margin: 0; font-size: 20px; }
         <option value="html">HTML</option>
       </select>
     </label>
+    <label class="field">故障诊断
+      <button id="probeBtn" class="btn small" type="button" style="margin-top:6px;">诊断 Worker 密钥的 COS 权限</button>
+      <pre id="probeResult" style="margin-top:6px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:11px;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-all;">尚未诊断</pre>
+    </label>
     <div class="dialog-actions">
       <button id="saveSettings" class="btn primary">保存</button>
       <button id="closeSettings" class="btn ghost">取消</button>
@@ -765,6 +769,17 @@ h1 { margin: 0; font-size: 20px; }
   $('urlInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') transferUrl(); });
   $('copyAllBtn').onclick = copyAllResults;
   $('settingsBtn').onclick = () => openSettings();
+  $('probeBtn').onclick = async () => {
+    const out = $('probeResult');
+    out.textContent = '诊断中…';
+    try {
+      const res = await fetch(`${cfg.worker}/probe`, { headers: listHeaders() });
+      const data = await res.json().catch(() => ({}));
+      out.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      out.textContent = '诊断失败：' + e.message;
+    }
+  };
   $('saveSettings').onclick = applySettings;
   $('closeSettings').onclick = closeSettings;
   $('settingsDialog').addEventListener('click', (e) => { if (e.target === $('settingsDialog')) closeSettings(); });

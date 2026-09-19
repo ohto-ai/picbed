@@ -230,6 +230,77 @@ async function cosList(env, marker) {
   return { items, truncated, nextMarker };
 }
 
+// ---------- 权限探针（临时调试用） ----------
+// 用长期密钥换临时密钥，实测 GetBucket / HeadObject 是否生效：
+//   listGetBucket: 200=有列表权限 403=无
+//   headObjectOnPrefix: 404=有对象权限（对象不存在） 403=无
+async function cosSigned(env, cred, method, uri, params) {
+  const host = `${env.BUCKET}.cos.${env.REGION}.myqcloud.com`;
+  const now = Math.floor(Date.now() / 1000);
+  const keyTime = `${now - 60};${now + 600}`;
+  const sortedKeys = Object.keys(params).sort();
+  const queryString = sortedKeys.map((k) => `${camSafeUrlEncode(k)}=${camSafeUrlEncode(params[k])}`).join('&');
+  const paramList = sortedKeys.join(';');
+  const headerObj = { host, 'x-cos-security-token': cred.sessionToken };
+  const headerKeys = Object.keys(headerObj).sort();
+  const httpHeaders = headerKeys
+    .map((k) => `${camSafeUrlEncode(k).toLowerCase()}=${camSafeUrlEncode(String(headerObj[k]))}`)
+    .join('&');
+  const headerList = headerKeys.join(';');
+  const httpString = `${method.toLowerCase()}\n${uri}\n${queryString}\n${httpHeaders}\n`;
+  const stringToSign = `sha1\n${keyTime}\n${await digestHex('SHA-1', httpString)}\n`;
+  const signKey = await hmac(cred.tmpSecretKey, keyTime, 'SHA-1');
+  const signature = bufToHex(await hmac(signKey, stringToSign, 'SHA-1'));
+  const authorization = `q-sign-algorithm=sha1&q-ak=${cred.tmpSecretId}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=${headerList}&q-url-param-list=${paramList}&q-signature=${signature}`;
+  const reqHeaders = {};
+  for (const k of headerKeys) reqHeaders[k] = String(headerObj[k]);
+  reqHeaders.Authorization = authorization;
+  const resp = await fetch(`https://${host}${uri}${queryString ? '?' + queryString : ''}`, {
+    method: method.toUpperCase(),
+    headers: reqHeaders,
+  });
+  return { status: resp.status, body: (await resp.text()).slice(0, 200) };
+}
+
+async function probePermissions(env) {
+  const bucketRes = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}/*`;
+  const prefixRes = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}/${env.PREFIX}/*`;
+  const probePolicy = {
+    version: '2.0',
+    statement: [
+      { effect: 'allow', action: ['name/cos:GetBucket'], resource: [bucketRes] },
+      { effect: 'allow', action: ['name/cos:HeadObject'], resource: [prefixRes] },
+    ],
+  };
+  const tok = await tc3Request(
+    env.TENCENT_SECRET_ID,
+    env.TENCENT_SECRET_KEY,
+    'GetFederationToken',
+    '2018-08-13',
+    { Name: 'picbed-probe', Policy: JSON.stringify(probePolicy), DurationSeconds: 900 },
+    env.REGION || 'ap-shanghai'
+  );
+  const cred = {
+    tmpSecretId: tok.Credentials.TmpSecretId,
+    tmpSecretKey: tok.Credentials.TmpSecretKey,
+    sessionToken: tok.Credentials.Token,
+  };
+  const list = await cosSigned(env, cred, 'GET', '/', { prefix: env.PREFIX + '/', 'max-keys': '1' });
+  const head = await cosSigned(env, cred, 'HEAD', `/${env.PREFIX}/__probe_nonexist__.txt`, {});
+  let longKeyList = 'ok';
+  try {
+    await cosList(env, '');
+  } catch (e) {
+    longKeyList = e.message.slice(0, 120);
+  }
+  return json({
+    token: 'ok',
+    listGetBucket: list.status,
+    headObjectOnPrefix: head.status,
+    longKeyListError: longKeyList,
+  });
+}
+
 // ---------- 远程图片转存 ----------
 const EXT_BY_TYPE = {
   'image/png': 'png',
@@ -340,14 +411,11 @@ export default {
           return jsonErr(502, e.message);
         }
       }
-      // 临时调试：回显 Cloudflare fetch 实际发出的 URL 和请求头（无密码保护，内容无害）
-      if (url.pathname === '/echo' && request.method === 'GET') {
+      // 临时调试：实测 Worker 密钥的 COS 有效权限（需密码）
+      if (url.pathname === '/probe' && request.method === 'GET') {
+        if (!checkPassword(request, env)) return jsonErr(403, '密码错误');
         try {
-          const r = await fetch('https://httpbin.org/get?max-keys=500&prefix=img%2F&zz=1', {
-            headers: { Authorization: 'q-sign-algorithm=sha1&test=a;b' },
-          });
-          const data = await r.json();
-          return json({ status: r.status, seenUrl: data.url, seenHeaders: data.headers });
+          return await probePermissions(env);
         } catch (e) {
           return jsonErr(502, e.message);
         }
