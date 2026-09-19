@@ -406,6 +406,19 @@ h1 { margin: 0; font-size: 20px; }
     return `${galleryPrefix}${time}_${rand}.${ext}`;
   }
 
+  function errMsg(e) {
+    if (!e) return '未知错误';
+    if (typeof e === 'string') return e;
+    if (e.message) return e.message;
+    if (e.error) {
+      if (typeof e.error === 'string') return e.error;
+      if (e.error.Message) return e.error.Message;
+      if (e.error.Code) return 'COS 错误 ' + e.error.Code;
+    }
+    if (e.statusCode) return 'HTTP ' + e.statusCode;
+    try { return JSON.stringify(e); } catch (x) { return '未知错误'; }
+  }
+
   function isImageFile(f) {
     if (f.type && f.type.startsWith('image/')) return true;
     return IMAGE_EXTS.includes((f.name.split('.').pop() || '').toLowerCase());
@@ -529,7 +542,8 @@ h1 { margin: 0; font-size: 20px; }
           await sleep(350);
           item.row.remove();
         } catch (e) {
-          item.status.textContent = '失败：' + (e.message || '未知错误') + '（点此重试）';
+          console.error('[picbed] 上传失败:', e);
+          item.status.textContent = '失败：' + errMsg(e) + '（点此重试）';
           item.row.classList.add('error');
           item.status.onclick = () => {
             item.status.onclick = null;
