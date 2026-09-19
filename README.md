@@ -75,7 +75,7 @@ picbed/
        {
          "effect": "allow",
          "action": ["name/cos:GetBucket", "name/cos:ListMultipartUploads"],
-         "resource": ["qcs::cos:ap-shanghai:uid/1255316209:album-1255316209"]
+         "resource": ["qcs::cos:ap-shanghai:uid/1255316209:album-1255316209/*"]
        }
      ]
    }
