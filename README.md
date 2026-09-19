@@ -45,10 +45,43 @@ picbed/
 
 ## 部署步骤
 
-### 一、准备腾讯云密钥
+### 一、准备腾讯云密钥（推荐子账号）
 
-1. 打开 [腾讯云 API 密钥管理](https://console.cloud.tencent.com/cam/capi)，新建密钥，记下 SecretId / SecretKey
-2. 安全建议：在 [CAM 访问管理](https://console.cloud.tencent.com/cam) 单独创建一个子账号，只授予 COS 权限（如 `QcloudCOSFullAccess`，或更细粒度只授权 `album-1255316209` 桶）以及 `sts:GetFederationToken`，用子账号的密钥
+1. 打开 [腾讯云 API 密钥管理](https://console.cloud.tencent.com/cam/capi) 新建密钥，记下 SecretId / SecretKey（直接用主账号密钥的话到这一步即可）
+2. 更安全的做法是子账号：
+   - CAM → **策略 → 新建自定义策略 → 按策略语法创建（空白模板）**，名称随意（如 `PicbedWorker`），粘贴下方 JSON
+   - CAM → **用户 → 新建用户 → 自定义创建**，访问方式只勾选「编程访问」，创建完成后立即保存 SecretId / SecretKey（只显示一次）
+   - 给该子账号「关联策略」，勾选刚创建的 `PicbedWorker`
+
+   ```json
+   {
+     "version": "2.0",
+     "statement": [
+       {
+         "effect": "allow",
+         "action": [
+           "name/cos:PutObject",
+           "name/cos:PostObject",
+           "name/cos:HeadObject",
+           "name/cos:DeleteObject",
+           "name/cos:InitiateMultipartUpload",
+           "name/cos:UploadPart",
+           "name/cos:CompleteMultipartUpload",
+           "name/cos:AbortMultipartUpload",
+           "name/cos:ListParts"
+         ],
+         "resource": ["qcs::cos:ap-shanghai:uid/1255316209:album-1255316209/img/*"]
+       },
+       {
+         "effect": "allow",
+         "action": ["name/cos:GetBucket", "name/cos:ListMultipartUploads"],
+         "resource": ["qcs::cos:ap-shanghai:uid/1255316209:album-1255316209"]
+       }
+     ]
+   }
+   ```
+
+   注意：`GetFederationToken`（换临时密钥）不需要也不能在 CAM 里单独授权；子账号凭自身 COS 权限即可调用，最终临时密钥权限 = 子账号权限 ∩ 请求中的 Policy。
 
 ### 二、配置存储桶 CORS（必须！否则浏览器上传会失败）
 
