@@ -75,6 +75,12 @@ h1 { margin: 0; font-size: 20px; }
 .gallery-path .sep { color: var(--muted); }
 .gallery-path .crumb.current { font-weight: 700; color: var(--text); cursor: default; }
 .gallery-path .crumb.current:hover { background: none; }
+.gallery-path .crumb.drop-hover { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+/* 拖拽移动反馈 */
+.grid figure.dragging { opacity: .4; }
+.grid figure.drop-hover { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.grid figure.drop-hover .folder-icon { transform: scale(1.08); }
 
 /* 全页拖放遮罩 */
 #dropOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; }
@@ -225,7 +231,7 @@ h1 { margin: 0; font-size: 20px; }
     <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
     <span id="galleryCount"></span>
   </div>
-  <div class="gallery-hint">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
+  <div class="gallery-hint">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
   <div class="urlbar">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
@@ -983,6 +989,74 @@ h1 { margin: 0; font-size: 20px; }
     }
   }
 
+  // ---------- 拖拽移动（图片 / 相册） ----------
+  let dragPayload = null;
+
+  function canDropInto(targetPrefix) {
+    if (!dragPayload) return false;
+    if (dragPayload.kind === 'folder') {
+      // 不能拖进自己或自己的子相册（否则会无限自我复制）
+      return !targetPrefix.startsWith(dragPayload.prefix);
+    }
+    return targetPrefix !== galleryPrefix; // 图片已在当前目录，拖回当前目录是空操作
+  }
+
+  function makeDropTarget(el, getTargetPrefix) {
+    el.addEventListener('dragover', (e) => {
+      if (!canDropInto(getTargetPrefix())) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-hover');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-hover'));
+    el.addEventListener('drop', (e) => {
+      el.classList.remove('drop-hover');
+      if (!canDropInto(getTargetPrefix())) return;
+      e.preventDefault();
+      e.stopPropagation();
+      performDrop(getTargetPrefix());
+    });
+  }
+
+  async function performDrop(targetPrefix) {
+    const payload = dragPayload;
+    dragPayload = null;
+    if (!payload) return;
+    if (payload.kind === 'folder') {
+      const name = payload.prefix.slice(0, -1).split('/').pop();
+      const parent = payload.prefix.slice(0, -(name.length + 1));
+      if (targetPrefix === parent) return toast('已经在该位置', true);
+      try {
+        await ensureAlbumPath(targetPrefix);
+      } catch (e) {}
+      await moveFolder(payload.prefix, targetPrefix + name + '/');
+    } else {
+      await moveImagesTo(payload.keys, targetPrefix);
+    }
+  }
+
+  async function moveImagesTo(keys, targetPrefix) {
+    if (!keys || !keys.length) return;
+    if (targetPrefix === galleryPrefix) return toast('图片已经在该目录', true);
+    const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
+    const { action, map } = await resolveCollisions(pairs);
+    if (action === 'cancel') return toast('已取消');
+    try {
+      await ensureAlbumPath(targetPrefix);
+      for (let i = 0; i < pairs.length; i++) {
+        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
+        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
+      }
+      await deleteKeysP(keys);
+      toast('移动完成');
+      clearSelection();
+      loadGallery(true);
+    } catch (err) {
+      toast('移动失败（已复制的文件保留在目标相册）：' + (err.message || err), true);
+    }
+  }
+
   function renderBreadcrumb() {
     const el = $('galleryPath');
     el.textContent = '';
@@ -992,6 +1066,7 @@ h1 { margin: 0; font-size: 20px; }
       b.className = 'crumb' + (isCurrent ? ' current' : '');
       b.textContent = label;
       if (!isCurrent) b.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
+      makeDropTarget(b, () => prefix); // 可把图片/相册拖到上级目录
       el.appendChild(b);
     };
     const sep = () => {
@@ -1080,6 +1155,22 @@ h1 { margin: 0; font-size: 20px; }
     actions.append(rename, move, del);
     fig.append(icon, actions, cap);
     fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
+    // 可拖拽（移动相册）也可作为放置目标（接收图片/相册）
+    fig.draggable = true;
+    fig.addEventListener('dragstart', (e) => {
+      dragPayload = { kind: 'folder', prefix };
+      e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData('application/x-picbed-move', 'folder');
+        e.dataTransfer.setData('text/plain', prefix);
+      } catch (err) {}
+      fig.classList.add('dragging');
+    });
+    fig.addEventListener('dragend', () => {
+      fig.classList.remove('dragging');
+      dragPayload = null;
+    });
+    makeDropTarget(fig, () => prefix);
     return fig;
   }
 
@@ -1160,24 +1251,7 @@ h1 { margin: 0; font-size: 20px; }
     if (!keys.length) return;
     const raw = prompt('移动到哪个相册？（相对当前目录，可用 / 指定多级；留空=根目录；取消=不移动）');
     if (raw === null) return;
-    const targetPrefix = parseTargetPrefix(raw);
-    if (targetPrefix === galleryPrefix) return toast('目标就是当前目录', true);
-    const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
-    const { action, map } = await resolveCollisions(pairs);
-    if (action === 'cancel') return toast('已取消');
-    try {
-      await ensureAlbumPath(targetPrefix);
-      for (let i = 0; i < pairs.length; i++) {
-        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
-        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
-      }
-      await deleteKeysP(keys);
-      toast('移动完成');
-      clearSelection();
-      loadGallery(true);
-    } catch (err) {
-      toast('移动失败（已复制的文件保留在目标相册）：' + (err.message || err), true);
-    }
+    await moveImagesTo(keys, parseTargetPrefix(raw));
   }
 
   async function bulkDelete() {
@@ -1202,6 +1276,7 @@ h1 { margin: 0; font-size: 20px; }
     check.hidden = !selectMode;
     const img = document.createElement('img');
     img.loading = 'lazy';
+    img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
     img.src = publicUrl(it.key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
     img.onerror = () => {
       if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.key); }
@@ -1210,6 +1285,22 @@ h1 { margin: 0; font-size: 20px; }
     const cap = document.createElement('figcaption');
     cap.textContent = it.key.split('/').pop();
     fig.append(check, img, cap);
+    // 拖拽移动：多选模式下拖动已选中的图片会移动整批
+    fig.draggable = true;
+    fig.addEventListener('dragstart', (e) => {
+      const keys = selectMode && selectedKeys.has(it.key) ? [...selectedKeys] : [it.key];
+      dragPayload = { kind: 'image', keys };
+      e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData('application/x-picbed-move', 'image');
+        e.dataTransfer.setData('text/plain', keys.join('\n'));
+      } catch (err) {}
+      fig.classList.add('dragging');
+    });
+    fig.addEventListener('dragend', () => {
+      fig.classList.remove('dragging');
+      dragPayload = null;
+    });
     fig.onclick = () => {
       if (selectMode) {
         if (selectedKeys.has(it.key)) {
