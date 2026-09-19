@@ -163,6 +163,14 @@ h1 { margin: 0; font-size: 20px; }
 .dialog-box { background: var(--panel); border-radius: var(--radius); padding: 20px 22px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
 .dialog-box h2 { margin: 0 0 14px; font-size: 16px; }
 .dialog-box p { margin: 0 0 14px; color: var(--muted); word-break: break-all; }
+.dup-preview { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+.dup-side { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.dup-side img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--border); }
+.dup-arrow { font-size: 18px; color: var(--muted); }
+.dup-compare { font-size: 12px; font-weight: 600; }
+.dup-compare.same { color: var(--ok); }
+.dup-compare.diff { color: var(--danger); }
+.dup-apply { margin: 0 0 12px; }
 .field { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
 .field .req { color: var(--danger); }
 .field input, .field select {
@@ -292,7 +300,20 @@ h1 { margin: 0; font-size: 20px; }
 <div id="dupDialog" class="dialog" hidden>
   <div class="dialog-box">
     <h2>⚠️ 文件冲突</h2>
+    <div id="dupPreview" class="dup-preview" hidden>
+      <div class="dup-side">
+        <img id="dupNewImg" alt="新文件">
+        <span>新文件（待上传）</span>
+      </div>
+      <span class="dup-arrow">→</span>
+      <div class="dup-side">
+        <img id="dupOldImg" alt="现有文件">
+        <span>现有文件</span>
+      </div>
+    </div>
+    <p id="dupCompare" class="dup-compare"></p>
     <p id="dupMsg"></p>
+    <label class="check dup-apply"><input type="checkbox" id="dupApplyAll"> 对后续所有文件应用此选择</label>
     <div class="dialog-actions">
       <button id="dupOverwrite" class="btn primary">覆盖</button>
       <button id="dupRename" class="btn">自动重命名</button>
@@ -509,10 +530,15 @@ h1 { margin: 0; font-size: 20px; }
     queue.push({ file, row, fill, status, done: false });
   }
 
-  async function uploadFile(file, fill, status) {
+  async function uploadFile(file, fill, status, dupCtx) {
     let key = makeKey(file.name, file.type);
-    if (await headP(key) === 'exists') {
-      const action = await askDialog(`当前目录已有「${file.name}」，如何处理？`, { cancel: '跳过' });
+    if ((await headP(key)).state === 'exists') {
+      let action = dupCtx.action;
+      if (!action) {
+        const res = await askDialog(`当前目录已有「${file.name}」，如何处理？`, { cancel: '跳过', file, oldKey: key });
+        action = res.action;
+        if (res.applyAll) dupCtx.action = action;
+      }
       if (action === 'cancel') return { skipped: true };
       if (action === 'rename') key = await autoRenameKey(key);
     }
@@ -540,12 +566,13 @@ h1 { margin: 0; font-size: 20px; }
     if (processing) return;
     processing = true;
     let uploadedAny = false;
+    const dupCtx = { action: null };
     try {
       for (const item of queue) {
         if (item.done) continue;
         item.status.textContent = '上传中…';
         try {
-          const url = await uploadFile(item.file, item.fill, item.status);
+          const url = await uploadFile(item.file, item.fill, item.status, dupCtx);
           item.done = true;
           if (url && url.skipped) {
             item.status.textContent = '已跳过（同名文件）';
@@ -719,11 +746,35 @@ h1 { margin: 0; font-size: 20px; }
   }
   function headP(key) {
     return new Promise((resolve) => {
-      cos.headObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err) => {
-        if (err) resolve(err.statusCode === 404 ? 'free' : 'error');
-        else resolve('exists');
+      cos.headObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err, data) => {
+        if (err) return resolve({ state: err.statusCode === 404 ? 'free' : 'error' });
+        const size = data
+          ? Number((data.headers && data.headers['content-length']) || data['content-length']) || 0
+          : 0;
+        resolve({ state: 'exists', size });
       });
     });
+  }
+
+  // 内容一致性检查：先比大小，大小相同则下载远端逐字节比对
+  async function compareFiles(file, key) {
+    const head = await headP(key);
+    if (head.state !== 'exists') return 'unknown';
+    if (head.size !== file.size) return 'diff';
+    let remoteBuf;
+    try {
+      const resp = await fetch(publicUrl(key));
+      if (!resp.ok) return 'size-same';
+      remoteBuf = new Uint8Array(await resp.arrayBuffer());
+    } catch (e) {
+      return 'size-same';
+    }
+    const localBuf = new Uint8Array(await file.arrayBuffer());
+    if (remoteBuf.length !== localBuf.length) return 'diff';
+    for (let i = 0; i < localBuf.length; i++) {
+      if (remoteBuf[i] !== localBuf[i]) return 'diff';
+    }
+    return 'same';
   }
 
   function askDialog(message, opts) {
@@ -732,10 +783,39 @@ h1 { margin: 0; font-size: 20px; }
       $('dupOverwrite').textContent = (opts && opts.overwrite) || '覆盖';
       $('dupRename').textContent = (opts && opts.rename) || '自动重命名';
       $('dupSkip').textContent = (opts && opts.cancel) || '取消';
+      $('dupPreview').hidden = !(opts && opts.file);
+      $('dupApplyAll').checked = false;
+      if (opts && opts.file) {
+        $('dupNewImg').src = URL.createObjectURL(opts.file);
+        $('dupOldImg').src = publicUrl(opts.oldKey);
+        compareFiles(opts.file, opts.oldKey).then((r) => {
+          const el = $('dupCompare');
+          if (r === 'same') {
+            el.textContent = '✓ 两个文件内容完全一致';
+            el.className = 'dup-compare same';
+          } else if (r === 'diff') {
+            el.textContent = '✗ 两个文件内容不同（覆盖会替换现有文件）';
+            el.className = 'dup-compare diff';
+          } else if (r === 'size-same') {
+            el.textContent = '大小一致，但无法完成内容比对';
+            el.className = 'dup-compare';
+          } else {
+            el.textContent = '';
+            el.className = 'dup-compare';
+          }
+        });
+      } else {
+        $('dupCompare').textContent = '';
+        $('dupCompare').className = 'dup-compare';
+      }
       $('dupDialog').hidden = false;
-      $('dupOverwrite').onclick = () => { $('dupDialog').hidden = true; resolve('overwrite'); };
-      $('dupRename').onclick = () => { $('dupDialog').hidden = true; resolve('rename'); };
-      $('dupSkip').onclick = () => { $('dupDialog').hidden = true; resolve('cancel'); };
+      const answer = (action) => {
+        $('dupDialog').hidden = true;
+        resolve({ action, applyAll: $('dupApplyAll').checked });
+      };
+      $('dupOverwrite').onclick = () => answer('overwrite');
+      $('dupRename').onclick = () => answer('rename');
+      $('dupSkip').onclick = () => answer('cancel');
     });
   }
 
@@ -745,7 +825,7 @@ h1 { margin: 0; font-size: 20px; }
     const ext = dot > 0 ? key.slice(dot) : '';
     for (let n = 1; n < 1000; n++) {
       const cand = `${stem} (${n})${ext}`;
-      if (await headP(cand) === 'free') return cand;
+      if ((await headP(cand)).state === 'free') return cand;
     }
     return `${stem}_${Date.now()}${ext}`;
   }
@@ -753,10 +833,10 @@ h1 { margin: 0; font-size: 20px; }
   async function resolveCollisions(pairs) {
     const collided = [];
     for (const p of pairs) {
-      if (await headP(p.targetKey) === 'exists') collided.push(p.targetKey);
+      if ((await headP(p.targetKey)).state === 'exists') collided.push(p.targetKey);
     }
     if (!collided.length) return { action: 'go', map: {} };
-    const action = await askDialog(`目标位置已有 ${collided.length} 个同名文件，如何处理？`, { cancel: '取消' });
+    const { action } = await askDialog(`目标位置已有 ${collided.length} 个同名文件，如何处理？`, { cancel: '取消' });
     if (action === 'cancel') return { action: 'cancel', map: {} };
     if (action === 'overwrite') return { action: 'go', map: {} };
     const map = {};
