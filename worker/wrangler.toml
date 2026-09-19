@@ -1,0 +1,17 @@
+# PicBed Worker 配置
+name = "picbed-worker"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+# 腾讯云 COS 存储桶（已按你的桶填好）
+BUCKET = "album-1255316209"
+REGION = "ap-shanghai"
+APPID = "1255316209"
+# 上传目录前缀，必须与前端 config.js 的 prefix 一致
+PREFIX = "img"
+
+# 密钥不写在这里！用命令配置：
+#   wrangler secret put TENCENT_SECRET_ID
+#   wrangler secret put TENCENT_SECRET_KEY
+#   wrangler secret put PICBED_PASSWORD   （可选，设置上传密码）
