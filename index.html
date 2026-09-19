@@ -68,24 +68,21 @@ h1 { margin: 0; font-size: 20px; }
 .btn.danger:hover { border-color: var(--danger); }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
 
-/* Tab */
-.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
-.tab {
-  border: none; background: none; color: var(--muted); font-size: 14px;
-  padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+/* 面包屑导航（GitHub 风格） */
+.gallery-path { display: flex; align-items: center; flex-wrap: wrap; font-size: 16px; margin: 16px 0 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.gallery-path .crumb { border: none; background: none; color: var(--accent); cursor: pointer; font-size: 15px; padding: 3px 10px; border-radius: 6px; }
+.gallery-path .crumb:hover { background: var(--accent-soft); }
+.gallery-path .sep { color: var(--muted); }
+.gallery-path .crumb.current { font-weight: 700; color: var(--text); cursor: default; }
+.gallery-path .crumb.current:hover { background: none; }
 
-/* 上传区 */
-.dropzone {
-  border: 2px dashed var(--border); border-radius: var(--radius); background: var(--panel);
-  padding: 40px 20px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
-}
-.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
-.dz-icon { font-size: 34px; }
-.dropzone p { margin: 6px 0 0; }
-.dropzone .link { color: var(--accent); }
+/* 全页拖放遮罩 */
+#dropOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; }
+.drop-overlay-box { background: var(--panel); border: 3px dashed var(--accent); border-radius: var(--radius); padding: 48px 64px; text-align: center; }
+.dz-icon { font-size: 40px; }
+.drop-overlay-box p { margin: 8px 0 0; }
 .dz-hint { font-size: 12px; color: var(--muted); }
+.gallery-hint { font-size: 12px; color: var(--muted); margin: -4px 0 10px; }
 
 .urlbar { display: flex; gap: 8px; margin: 14px 0; }
 .urlbar input {
@@ -144,11 +141,11 @@ h1 { margin: 0; font-size: 20px; }
 .bulk-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
 #bulkCount { font-size: 13px; }
 
-.folder-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-.folder-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
-.folder-chip:hover { border-color: var(--accent); }
-.folder-chip button { border: none; background: none; cursor: pointer; font-size: 12px; opacity: .45; padding: 0; }
-.folder-chip button:hover { opacity: 1; }
+.folder-tile { cursor: pointer; }
+.folder-tile .folder-icon { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 54px; background: linear-gradient(135deg, var(--accent-soft), transparent); }
+.folder-tile .folder-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; z-index: 2; }
+.folder-tile:hover .folder-actions { opacity: 1; }
+.folder-tile .folder-actions button { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .grid figure { position: relative; margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: zoom-in; transition: transform .12s, box-shadow .12s; }
@@ -206,59 +203,59 @@ h1 { margin: 0; font-size: 20px; }
     <button id="settingsBtn" class="btn ghost">⚙️ 设置</button>
   </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="upload">⬆️ 上传</button>
-    <button class="tab" data-tab="gallery">🖼️ 相册</button>
-  </nav>
+  <input type="file" id="fileInput" accept="image/*" multiple hidden>
 
-  <section id="tab-upload">
-    <div id="dropZone" class="dropzone">
-      <div class="dz-icon">⬆️</div>
-      <p>拖拽图片到这里，或 <span class="link">点击选择文件</span></p>
-      <p class="dz-hint">支持 Ctrl+V 粘贴截图 · 批量上传 · 单张 ≤ 50MB</p>
-    </div>
-    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  <div id="galleryPath" class="gallery-path"></div>
 
-    <div class="urlbar">
-      <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到你的图床…">
-      <button id="urlBtn" class="btn">转存</button>
-    </div>
+  <div class="gallery-toolbar">
+    <button id="uploadBtn" class="btn primary">⬆️ 上传到当前目录</button>
+    <button id="newAlbumBtn" class="btn">📁 新建相册</button>
+    <button id="selectModeBtn" class="btn">☑️ 多选</button>
+    <button id="refreshGallery" class="btn">🔄 刷新</button>
+    <span class="gallery-spacer"></span>
+    <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
+    <span id="galleryCount"></span>
+  </div>
+  <div class="gallery-hint">拖拽图片到页面任意位置即可上传 · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
-    <div id="queue"></div>
+  <div class="urlbar">
+    <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
+    <button id="urlBtn" class="btn">转存</button>
+  </div>
 
+  <div id="bulkBar" class="bulk-bar" hidden>
+    <span id="bulkCount"></span>
+    <button id="bulkMoveBtn" class="btn small">📦 移动到相册</button>
+    <button id="bulkDeleteBtn" class="btn small danger">批量删除</button>
+    <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
+  </div>
+
+  <div id="galleryGrid" class="grid"></div>
+  <div class="gallery-more"><button id="loadMore" class="btn" hidden>加载更多</button></div>
+
+  <div id="queue"></div>
+
+  <div id="resultsSection" hidden>
     <div class="section-head">
       <h2>本次上传</h2>
       <button id="copyAllBtn" class="btn small">复制全部（当前格式）</button>
     </div>
     <div id="results" class="results"></div>
+  </div>
 
-    <details id="historyBox" class="history">
-      <summary>📋 上传历史（仅存本机浏览器）</summary>
-      <div class="history-toolbar"><button id="clearHistory" class="btn small danger">清空记录</button></div>
-      <ul id="historyList"></ul>
-    </details>
-  </section>
+  <details id="historyBox" class="history">
+    <summary>📋 上传历史（仅存本机浏览器）</summary>
+    <div class="history-toolbar"><button id="clearHistory" class="btn small danger">清空记录</button></div>
+    <ul id="historyList"></ul>
+  </details>
 
-  <section id="tab-gallery" hidden>
-    <div class="gallery-toolbar">
-      <button id="refreshGallery" class="btn">🔄 刷新</button>
-      <button id="newAlbumBtn" class="btn">📁 新建相册</button>
-      <button id="selectModeBtn" class="btn">☑️ 多选</button>
-      <span id="galleryPath" class="gallery-path"></span>
-      <span class="gallery-spacer"></span>
-      <label class="check"><input type="checkbox" id="thumbMode"> 缩略图（需在 COS 开通图片处理）</label>
-      <span id="galleryCount"></span>
+  <div id="dropOverlay" hidden>
+    <div class="drop-overlay-box">
+      <div class="dz-icon">⬆️</div>
+      <p id="dropTargetLabel">松开鼠标，上传到当前目录</p>
+      <p class="dz-hint">支持批量 · Ctrl+V 粘贴也可以</p>
     </div>
-    <div id="bulkBar" class="bulk-bar" hidden>
-      <span id="bulkCount"></span>
-      <button id="bulkMoveBtn" class="btn small">📦 移动到相册</button>
-      <button id="bulkDeleteBtn" class="btn small danger">批量删除</button>
-      <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
-    </div>
-    <div id="folderBar" class="folder-bar"></div>
-    <div id="galleryGrid" class="grid"></div>
-    <div class="gallery-more"><button id="loadMore" class="btn" hidden>加载更多</button></div>
-  </section>
+  </div>
 </div>
 
 <div id="settingsDialog" class="dialog" hidden>
@@ -396,7 +393,6 @@ h1 { margin: 0; font-size: 20px; }
   function makeKey(fileName, type) {
     const d = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const datePath = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
     const time = `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
     const TYPE_EXT = {
       'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
@@ -406,9 +402,8 @@ h1 { margin: 0; font-size: 20px; }
     let ext = raw.includes('.') ? raw.split('.').pop().toLowerCase() : '';
     if (!/^[a-z0-9]{1,8}$/.test(ext)) ext = '';
     ext = ext || TYPE_EXT[type] || 'bin';
-    const base = raw.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'image';
     const rand = Math.random().toString(36).slice(2, 8);
-    return `${cfg.prefix}/${datePath}/${time}_${rand}.${ext}`;
+    return `${galleryPrefix}${time}_${rand}.${ext}`;
   }
 
   function isImageFile(f) {
@@ -517,6 +512,7 @@ h1 { margin: 0; font-size: 20px; }
   async function processQueue() {
     if (processing) return;
     processing = true;
+    let uploadedAny = false;
     try {
       for (const item of queue) {
         if (item.done) continue;
@@ -524,6 +520,7 @@ h1 { margin: 0; font-size: 20px; }
         try {
           const url = await uploadFile(item.file, item.fill, item.status);
           item.done = true;
+          uploadedAny = true;
           item.fill.style.width = '100%';
           item.status.textContent = '完成';
           item.row.classList.add('done');
@@ -544,6 +541,7 @@ h1 { margin: 0; font-size: 20px; }
       }
     } finally {
       processing = false;
+      if (uploadedAny) loadGallery(true);
     }
   }
 
@@ -551,6 +549,7 @@ h1 { margin: 0; font-size: 20px; }
   const sessionResults = [];
   function addResult(url, name) {
     sessionResults.unshift({ url, name });
+    $('resultsSection').hidden = false;
     const box = document.createElement('div');
     box.className = 'result';
     const img = document.createElement('img');
@@ -639,7 +638,6 @@ h1 { margin: 0; font-size: 20px; }
   // ---------- 相册 ----------
   let galleryMarker = '';
   let galleryLoaded = 0;
-  let galleryInitialized = false;
   let galleryPrefix = cfg.prefix + '/'; // 当前目录（尾部带 /）
   let selectMode = false;
   const selectedKeys = new Set();
@@ -706,7 +704,6 @@ h1 { margin: 0; font-size: 20px; }
       galleryMarker = '';
       galleryLoaded = 0;
       $('galleryGrid').textContent = '';
-      $('folderBar').textContent = '';
       clearSelection();
     }
     const btn = $('loadMore');
@@ -721,7 +718,7 @@ h1 { margin: 0; font-size: 20px; }
       });
       renderBreadcrumb();
       if (reset) {
-        for (const f of data.CommonPrefixes || []) $('folderBar').appendChild(renderFolderChip(f.Prefix));
+        for (const f of data.CommonPrefixes || []) $('galleryGrid').appendChild(renderFolderTile(f.Prefix));
       }
       const items = (data.Contents || [])
         .filter((c) => !c.Key.endsWith('/') && c.Key !== galleryPrefix)
@@ -744,32 +741,42 @@ h1 { margin: 0; font-size: 20px; }
     const el = $('galleryPath');
     el.textContent = '';
     const rootPrefix = cfg.prefix + '/';
-    if (galleryPrefix === rootPrefix) {
-      el.textContent = '全部图片';
-      return;
-    }
-    const crumb = (label, prefix) => {
+    const crumb = (label, prefix, isCurrent) => {
       const b = document.createElement('button');
-      b.className = 'crumb';
+      b.className = 'crumb' + (isCurrent ? ' current' : '');
       b.textContent = label;
-      b.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
+      if (!isCurrent) b.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
       el.appendChild(b);
     };
-    crumb('全部', rootPrefix);
-    let acc = rootPrefix;
-    for (const p of galleryPrefix.slice(rootPrefix.length).replace(/\/$/, '').split('/')) {
-      acc += p + '/';
-      crumb(p, acc);
+    const sep = () => {
+      const s = document.createElement('span');
+      s.className = 'sep';
+      s.textContent = '/';
+      el.appendChild(s);
+    };
+    crumb('🏠 全部', rootPrefix, galleryPrefix === rootPrefix);
+    if (galleryPrefix !== rootPrefix) {
+      let acc = rootPrefix;
+      const parts = galleryPrefix.slice(rootPrefix.length).replace(/\/$/, '').split('/');
+      parts.forEach((p, i) => {
+        sep();
+        acc += p + '/';
+        crumb(p, acc, i === parts.length - 1);
+      });
     }
   }
 
-  function renderFolderChip(prefix) {
-    const chip = document.createElement('div');
-    chip.className = 'folder-chip';
+  function renderFolderTile(prefix) {
     const name = prefix.slice(0, -1).split('/').pop() || prefix;
-    const label = document.createElement('span');
-    label.className = 'folder-name';
-    label.textContent = '📁 ' + name;
+    const fig = document.createElement('figure');
+    fig.className = 'folder-tile';
+    const icon = document.createElement('div');
+    icon.className = 'folder-icon';
+    icon.textContent = '📁';
+    const cap = document.createElement('figcaption');
+    cap.textContent = name;
+    const actions = document.createElement('div');
+    actions.className = 'folder-actions';
     const rename = document.createElement('button');
     rename.textContent = '✏️';
     rename.title = '重命名相册';
@@ -801,9 +808,10 @@ h1 { margin: 0; font-size: 20px; }
         toast('删除失败：' + (err.message || err), true);
       }
     };
-    chip.append(label, rename, del);
-    chip.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
-    return chip;
+    actions.append(rename, del);
+    fig.append(icon, actions, cap);
+    fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
+    return fig;
   }
 
   async function moveFolder(oldPrefix, newPrefix) {
@@ -999,29 +1007,33 @@ h1 { margin: 0; font-size: 20px; }
     closeSettings();
   }
 
-  // ---------- Tab ----------
-  function switchTab(name) {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-    $('tab-upload').hidden = name !== 'upload';
-    $('tab-gallery').hidden = name !== 'gallery';
-    if (name === 'gallery' && !galleryInitialized) {
-      galleryInitialized = true;
-      loadGallery(true);
-    }
-  }
-
   // ---------- 事件绑定 ----------
-  const dz = $('dropZone');
-  dz.onclick = () => $('fileInput').click();
+  // 选择文件与全页拖放上传
+  $('uploadBtn').onclick = () => $('fileInput').click();
   $('fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
-  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-  dz.addEventListener('drop', (e) => {
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files')) return;
     e.preventDefault();
-    dz.classList.remove('over');
-    addFiles([...e.dataTransfer.files]);
+    dragDepth++;
+    $('dropOverlay').hidden = false;
+    const cur = galleryPrefix === cfg.prefix + '/'
+      ? '全部图片'
+      : (galleryPrefix.slice(0, -1).split('/').pop() || '全部图片');
+    $('dropTargetLabel').textContent = `松开鼠标，上传到「${cur}」`;
   });
-  ['dragover', 'drop'].forEach((ev) => window.addEventListener(ev, (e) => e.preventDefault()));
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) $('dropOverlay').hidden = true;
+  });
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    $('dropOverlay').hidden = true;
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    if (files.length) addFiles(files);
+  });
 
   document.addEventListener('paste', (e) => {
     if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -1077,12 +1089,12 @@ h1 { margin: 0; font-size: 20px; }
   };
   $('lightboxClose').onclick = closeLightbox;
   $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) closeLightbox(); });
-  document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => switchTab(t.dataset.tab); });
 
   // ---------- 初始化 ----------
-  $('bucketInfo').textContent = `${cfg.bucket} · ${cfg.region} · ${cfg.prefix}/`;
+  $('bucketInfo').textContent = `${cfg.bucket} · ${cfg.region}`;
   renderHistory();
   if (!cfg.worker) openSettings();
+  loadGallery(true);
 })();
 </script>
 </body>
