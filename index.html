@@ -623,19 +623,24 @@ h1 { margin: 0; font-size: 20px; }
     btn.disabled = true;
     btn.textContent = '加载中…';
     try {
-      const qs = galleryMarker ? '?marker=' + encodeURIComponent(galleryMarker) : '';
-      const res = await fetch(`${cfg.worker}/list${qs}`, { headers: listHeaders() });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '加载相册失败');
-      const items = (data.items || []).filter((it) => !it.key.endsWith('/')).reverse();
-      for (const it of items) $('galleryGrid').appendChild(renderGridItem(it));
+      const data = await new Promise((resolve, reject) => {
+        cos.getBucket({
+          Bucket: cfg.bucket,
+          Region: cfg.region,
+          Prefix: cfg.prefix + '/',
+          MaxKeys: cfg.maxKeys || 500,
+          Marker: galleryMarker,
+        }, (err, res) => (err ? reject(err) : resolve(res)));
+      });
+      const items = (data.Contents || []).filter((it) => !it.Key.endsWith('/')).reverse();
+      for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }));
       galleryLoaded += items.length;
       $('galleryCount').textContent = `已显示 ${galleryLoaded} 张`;
-      galleryMarker = data.truncated ? data.nextMarker : '';
+      galleryMarker = String(data.IsTruncated) === 'true' ? data.NextMarker : '';
       btn.hidden = !galleryMarker;
     } catch (e) {
-      console.error('[picbed] 相册加载失败:', e.message);
-      toast(e.message, true);
+      console.error('[picbed] 相册加载失败:', e.message || e);
+      toast('相册加载失败：' + ((e && e.error && e.error.Message) || e.message || e), true);
     } finally {
       btn.disabled = false;
       btn.textContent = '加载更多';

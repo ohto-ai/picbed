@@ -99,9 +99,10 @@ async function tc3Request(secretId, secretKey, action, version, payload, region)
   return data.Response;
 }
 
-// 临时密钥策略：仅允许对 PREFIX 目录做上传/删除等对象操作
-// （相册列表走 /list 接口，由 Worker 用长期密钥直接调用 COS，不经过临时密钥）
+// 临时密钥策略：PREFIX 目录的对象操作 + 列出目录（GetBucket，供相册使用）
+// resource 格式注意：桶级操作也需要以 /* 结尾
 function buildPolicy(env) {
+  const bucketResource = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}/*`;
   const prefixResource = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}/${env.PREFIX}/*`;
   return {
     version: '2.0',
@@ -120,6 +121,11 @@ function buildPolicy(env) {
           'name/cos:ListParts',
         ],
         resource: [prefixResource],
+      },
+      {
+        effect: 'allow',
+        action: ['name/cos:GetBucket', 'name/cos:ListMultipartUploads'],
+        resource: [bucketResource],
       },
     ],
   };
