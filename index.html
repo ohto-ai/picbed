@@ -915,8 +915,33 @@ h1 { margin: 0; font-size: 20px; }
     return all;
   }
 
-  function sanitizeName(name) {
-    return String(name || '').trim().replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40);
+  // 相册路径：允许用 / 分隔多级目录，逐段清洗非法字符并过滤 . 与 ..
+  function sanitizePath(input) {
+    return String(input || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((s) => sanitizeSegment(s).slice(0, 40))
+      .filter(Boolean)
+      .join('/');
+  }
+
+  // 逐级创建相册标记，保证多级路径下每一层都是真实存在的相册
+  async function ensureAlbumPath(prefix) {
+    const root = cfg.prefix + '/';
+    if (!prefix || !prefix.startsWith(root)) return;
+    const rel = prefix.slice(root.length).replace(/\/+$/, '');
+    if (!rel) return;
+    let acc = root;
+    for (const seg of rel.split('/')) {
+      acc += seg + '/';
+      await putP(acc, '');
+    }
+  }
+
+  // 解析「移动 / 新建」输入的目标目录（相对当前目录，留空表示根目录）
+  function parseTargetPrefix(raw) {
+    const path = sanitizePath(raw);
+    return path ? galleryPrefix + path + '/' : cfg.prefix + '/';
   }
 
   async function loadGallery(reset) {
@@ -1000,12 +1025,37 @@ h1 { margin: 0; font-size: 20px; }
     actions.className = 'folder-actions';
     const rename = document.createElement('button');
     rename.textContent = '✏️';
-    rename.title = '重命名相册';
+    rename.title = '重命名相册（可用 / 创建多级）';
     rename.onclick = async (e) => {
       e.stopPropagation();
-      const newName = sanitizeName(prompt('新的相册名称：', name));
-      if (!newName) return;
-      await moveFolder(prefix, galleryPrefix + newName + '/');
+      const newPath = sanitizePath(prompt('新的相册名称（可用 / 创建多级）：', name));
+      if (!newPath) return;
+      const newPrefix = galleryPrefix + newPath + '/';
+      if (newPrefix === prefix) return;
+      if (newPrefix.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
+      try {
+        await ensureAlbumPath(galleryPrefix); // 确保父级存在
+      } catch (err) {}
+      await moveFolder(prefix, newPrefix);
+    };
+    const move = document.createElement('button');
+    move.textContent = '📦';
+    move.title = '移动相册到其他位置';
+    move.onclick = async (e) => {
+      e.stopPropagation();
+      const raw = prompt(
+        `把相册「${name}」移动到哪个相册？\n（相对当前目录，可用 / 指定多级；留空=移到根目录；取消=不移动）`
+      );
+      if (raw === null) return;
+      const targetParent = parseTargetPrefix(raw);
+      if (targetParent === galleryPrefix) return toast('目标就是当前位置', true);
+      if (targetParent.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
+      try {
+        await ensureAlbumPath(targetParent);
+      } catch (err) {
+        return toast('目标目录创建失败：' + (err.message || err), true);
+      }
+      await moveFolder(prefix, targetParent + name + '/');
     };
     const del = document.createElement('button');
     del.textContent = '🗑️';
@@ -1027,7 +1077,7 @@ h1 { margin: 0; font-size: 20px; }
         toast('删除失败：' + (err.message || err), true);
       }
     };
-    actions.append(rename, del);
+    actions.append(rename, move, del);
     fig.append(icon, actions, cap);
     fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
     return fig;
@@ -1057,8 +1107,8 @@ h1 { margin: 0; font-size: 20px; }
         if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
       }
       await deleteKeysP(keys); // 文件 + 旧相册标记 + 子相册旧标记
-      await putP(newPrefix, '');
-      toast('重命名完成');
+      await ensureAlbumPath(newPrefix); // 多级路径逐层建好，并补上新相册标记
+      toast('移动完成');
       loadGallery(true);
     } catch (err) {
       toast('移动失败（已复制的文件保留在新相册）：' + (err.message || err), true);
@@ -1068,10 +1118,10 @@ h1 { margin: 0; font-size: 20px; }
 
   async function newAlbum() {
     if (!needWorker()) return;
-    const name = sanitizeName(prompt('新相册名称：'));
-    if (!name) return;
+    const path = sanitizePath(prompt('新相册名称（可用 / 创建多级，如 旅行/2024/西藏）：'));
+    if (!path) return;
     try {
-      await putP(galleryPrefix + name + '/', '');
+      await ensureAlbumPath(galleryPrefix + path + '/');
       toast('相册已创建');
       loadGallery(true);
     } catch (err) {
@@ -1108,14 +1158,15 @@ h1 { margin: 0; font-size: 20px; }
   async function bulkMove() {
     const keys = [...selectedKeys];
     if (!keys.length) return;
-    const raw = prompt('移动到哪个相册？（留空移到根目录，取消则不移动）');
+    const raw = prompt('移动到哪个相册？（相对当前目录，可用 / 指定多级；留空=根目录；取消=不移动）');
     if (raw === null) return;
-    const target = sanitizeName(raw);
-    const targetPrefix = (target ? galleryPrefix + target : cfg.prefix) + '/';
+    const targetPrefix = parseTargetPrefix(raw);
+    if (targetPrefix === galleryPrefix) return toast('目标就是当前目录', true);
     const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
     const { action, map } = await resolveCollisions(pairs);
     if (action === 'cancel') return toast('已取消');
     try {
+      await ensureAlbumPath(targetPrefix);
       for (let i = 0; i < pairs.length; i++) {
         await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
         if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
