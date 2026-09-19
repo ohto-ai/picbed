@@ -113,6 +113,7 @@ function buildPolicy(env) {
           'name/cos:PutObject',
           'name/cos:PostObject',
           'name/cos:HeadObject',
+          'name/cos:GetObject',
           'name/cos:DeleteObject',
           'name/cos:InitiateMultipartUpload',
           'name/cos:UploadPart',

@@ -63,6 +63,7 @@ picbed/
            "name/cos:PutObject",
            "name/cos:PostObject",
            "name/cos:HeadObject",
+           "name/cos:GetObject",
            "name/cos:DeleteObject",
            "name/cos:InitiateMultipartUpload",
            "name/cos:UploadPart",
@@ -134,8 +135,12 @@ wrangler deploy
 - **上传**：拖拽 / 点击 / Ctrl+V 粘贴，支持批量；自动生成 `img/年/月/日/时间_随机.扩展名` 的路径
 - **转存**：粘贴图片 URL 点「转存」（Worker 抓取，10MB 上限）
 - **链接**：每条结果都有 URL / Markdown / HTML 三个复制按钮，「复制全部」按默认格式批量复制
-- **相册**：浏览桶内全部图片、点击放大、复制链接、删除；「缩略图」开关需要在 COS 开通图片处理功能
-- **上传密码**：Worker 里设了 `PICBED_PASSWORD` 后，页面「设置」里填相同密码
+- **相册管理**：
+  - 相册 = `img/` 下的文件夹；点文件夹进入，面包屑导航返回
+  - **新建相册** / **重命名**（文件夹上的 ✏️）/ **删除相册**（文件夹上的 🗑️）
+  - **多选模式**：勾选图片后批量删除、批量移动到指定相册
+  - 单图删除在灯箱里；「缩略图」开关需要在 COS 开通图片处理功能
+- **上传密码**：Worker 里设了 `PICBED_PASSWORD` 后，页面「设置」里填相同密码；没有密码的人只能看到页面，无法进行任何操作
 
 ## 常见问题
 
