@@ -1016,8 +1016,10 @@ h1 { margin: 0; font-size: 20px; }
     selectMode = !selectMode;
     $('selectModeBtn').classList.toggle('active', selectMode);
     document.querySelectorAll('#galleryGrid figure').forEach((f) => {
+      const check = f.querySelector('.sel-check');
+      if (!check) return; // 文件夹卡片不参与多选
       f.classList.toggle('selectable', selectMode);
-      f.querySelector('.sel-check').hidden = !selectMode;
+      check.hidden = !selectMode;
     });
     if (!selectMode) clearSelection();
     updateBulkBar();
