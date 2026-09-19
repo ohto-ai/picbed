@@ -200,9 +200,21 @@ async function cosList(env, marker) {
   const resp = await fetch(`https://${host}/?${queryString}`, { headers: { Authorization: authorization } });
   const xml = await resp.text();
   if (!resp.ok) {
-    const code = /<Code>([\s\S]*?)<\/Code>/.exec(xml)?.[1] || '';
-    const msg = /<Message>([\s\S]*?)<\/Message>/.exec(xml)?.[1] || '';
-    throw new Error(`COS 列表失败 HTTP ${resp.status} (${code}: ${msg})`);
+    const grab = (re) => {
+      const m = re.exec(xml);
+      return m ? unescapeXml(m[1]) : '';
+    };
+    const code = grab(/<Code>([\s\S]*?)<\/Code>/) || '';
+    const msg = grab(/<Message>([\s\S]*?)<\/Message>/) || '';
+    const expected = grab(/<StringToSign>([\s\S]*?)<\/StringToSign>/) || '';
+    const format = grab(/<FormatString>([\s\S]*?)<\/FormatString>/) || '';
+    const parts = [`COS 列表失败 HTTP ${resp.status} (${code}: ${msg})`];
+    if (format) parts.push(`COS期望FormatString=${JSON.stringify(format)}`);
+    if (expected) parts.push(`COS期望StringToSign=${JSON.stringify(expected)}`);
+    parts.push(`我方HttpString=${JSON.stringify(httpString)}`);
+    parts.push(`我方StringToSign=${JSON.stringify(stringToSign)}`);
+    parts.push(`COS原始XML=${JSON.stringify(xml.slice(0, 800))}`);
+    throw new Error(parts.join(' || '));
   }
   const truncated = /<IsTruncated>([\s\S]*?)<\/IsTruncated>/.exec(xml)?.[1] === 'true';
   const nextMarker = unescapeXml(/<NextMarker>([\s\S]*?)<\/NextMarker>/.exec(xml)?.[1] || '');
@@ -324,6 +336,18 @@ export default {
         try {
           const marker = url.searchParams.get('marker') || '';
           return json(await cosList(env, marker));
+        } catch (e) {
+          return jsonErr(502, e.message);
+        }
+      }
+      // 临时调试：回显 Cloudflare fetch 实际发出的 URL 和请求头（无密码保护，内容无害）
+      if (url.pathname === '/echo' && request.method === 'GET') {
+        try {
+          const r = await fetch('https://httpbin.org/get?max-keys=500&prefix=img%2F&zz=1', {
+            headers: { Authorization: 'q-sign-algorithm=sha1&test=a;b' },
+          });
+          const data = await r.json();
+          return json({ status: r.status, seenUrl: data.url, seenHeaders: data.headers });
         } catch (e) {
           return jsonErr(502, e.message);
         }
