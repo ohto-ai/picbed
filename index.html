@@ -68,8 +68,8 @@ h1 { margin: 0; font-size: 20px; }
 .btn.danger:hover { border-color: var(--danger); }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
 
-/* 面包屑导航（GitHub 风格） */
-.gallery-path { display: flex; align-items: center; flex-wrap: wrap; font-size: 16px; margin: 16px 0 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+/* 面包屑导航（GitHub 风格，紧贴图片上方并吸顶） */
+.gallery-path { position: sticky; top: 8px; z-index: 6; display: flex; align-items: center; flex-wrap: wrap; font-size: 16px; margin: 14px 0 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
 .gallery-path .crumb { border: none; background: none; color: var(--accent); cursor: pointer; font-size: 15px; padding: 3px 10px; border-radius: 6px; }
 .gallery-path .crumb:hover { background: var(--accent-soft); }
 .gallery-path .sep { color: var(--muted); }
@@ -138,7 +138,7 @@ h1 { margin: 0; font-size: 20px; }
 #selectModeBtn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 #galleryCount { color: var(--muted); font-size: 12px; }
 
-.bulk-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
+.bulk-bar { position: sticky; top: 58px; z-index: 5; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
 #bulkCount { font-size: 13px; }
 
 .folder-tile { cursor: pointer; }
@@ -162,6 +162,7 @@ h1 { margin: 0; font-size: 20px; }
 .dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
 .dialog-box { background: var(--panel); border-radius: var(--radius); padding: 20px 22px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
 .dialog-box h2 { margin: 0 0 14px; font-size: 16px; }
+.dialog-box p { margin: 0 0 14px; color: var(--muted); word-break: break-all; }
 .field { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
 .field .req { color: var(--danger); }
 .field input, .field select {
@@ -205,8 +206,6 @@ h1 { margin: 0; font-size: 20px; }
 
   <input type="file" id="fileInput" accept="image/*" multiple hidden>
 
-  <div id="galleryPath" class="gallery-path"></div>
-
   <div class="gallery-toolbar">
     <button id="uploadBtn" class="btn primary">⬆️ 上传到当前目录</button>
     <button id="newAlbumBtn" class="btn">📁 新建相册</button>
@@ -229,6 +228,8 @@ h1 { margin: 0; font-size: 20px; }
     <button id="bulkDeleteBtn" class="btn small danger">批量删除</button>
     <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
   </div>
+
+  <div id="galleryPath" class="gallery-path"></div>
 
   <div id="galleryGrid" class="grid"></div>
   <div class="gallery-more"><button id="loadMore" class="btn" hidden>加载更多</button></div>
@@ -284,6 +285,18 @@ h1 { margin: 0; font-size: 20px; }
     <div class="dialog-actions">
       <button id="saveSettings" class="btn primary">保存</button>
       <button id="closeSettings" class="btn ghost">取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="dupDialog" class="dialog" hidden>
+  <div class="dialog-box">
+    <h2>⚠️ 文件冲突</h2>
+    <p id="dupMsg"></p>
+    <div class="dialog-actions">
+      <button id="dupOverwrite" class="btn primary">覆盖</button>
+      <button id="dupRename" class="btn">自动重命名</button>
+      <button id="dupSkip" class="btn ghost">跳过</button>
     </div>
   </div>
 </div>
@@ -391,19 +404,15 @@ h1 { margin: 0; font-size: 20px; }
   }
 
   function makeKey(fileName, type) {
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const time = `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    const TYPE_EXT = {
-      'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
-      'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
-    };
-    const raw = String(fileName || '').replace(/[\\/:*?"<>|]+/g, '_');
-    let ext = raw.includes('.') ? raw.split('.').pop().toLowerCase() : '';
-    if (!/^[a-z0-9]{1,8}$/.test(ext)) ext = '';
-    ext = ext || TYPE_EXT[type] || 'bin';
-    const rand = Math.random().toString(36).slice(2, 8);
-    return `${galleryPrefix}${time}_${rand}.${ext}`;
+    let name = String(fileName || '').trim().replace(/[\\/:*?"<>|]+/g, '_');
+    if (!name || name === '_') {
+      const TYPE_EXT = {
+        'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+        'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
+      };
+      name = 'image_' + Math.random().toString(36).slice(2, 8) + '.' + (TYPE_EXT[type] || 'bin');
+    }
+    return galleryPrefix + name;
   }
 
   function errMsg(e) {
@@ -500,8 +509,13 @@ h1 { margin: 0; font-size: 20px; }
     queue.push({ file, row, fill, status, done: false });
   }
 
-  function uploadFile(file, fill, status) {
-    const key = makeKey(file.name, file.type);
+  async function uploadFile(file, fill, status) {
+    let key = makeKey(file.name, file.type);
+    if (await headP(key) === 'exists') {
+      const action = await askDialog(`当前目录已有「${file.name}」，如何处理？`, { cancel: '跳过' });
+      if (action === 'cancel') return { skipped: true };
+      if (action === 'rename') key = await autoRenameKey(key);
+    }
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     return new Promise((resolve, reject) => {
       cos.uploadFile({
@@ -533,6 +547,13 @@ h1 { margin: 0; font-size: 20px; }
         try {
           const url = await uploadFile(item.file, item.fill, item.status);
           item.done = true;
+          if (url && url.skipped) {
+            item.status.textContent = '已跳过（同名文件）';
+            item.row.classList.add('done');
+            await sleep(350);
+            item.row.remove();
+            continue;
+          }
           uploadedAny = true;
           item.fill.style.width = '100%';
           item.status.textContent = '完成';
@@ -696,6 +717,53 @@ h1 { margin: 0; font-size: 20px; }
       next();
     });
   }
+  function headP(key) {
+    return new Promise((resolve) => {
+      cos.headObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err) => {
+        if (err) resolve(err.statusCode === 404 ? 'free' : 'error');
+        else resolve('exists');
+      });
+    });
+  }
+
+  function askDialog(message, opts) {
+    return new Promise((resolve) => {
+      $('dupMsg').textContent = message;
+      $('dupOverwrite').textContent = (opts && opts.overwrite) || '覆盖';
+      $('dupRename').textContent = (opts && opts.rename) || '自动重命名';
+      $('dupSkip').textContent = (opts && opts.cancel) || '取消';
+      $('dupDialog').hidden = false;
+      $('dupOverwrite').onclick = () => { $('dupDialog').hidden = true; resolve('overwrite'); };
+      $('dupRename').onclick = () => { $('dupDialog').hidden = true; resolve('rename'); };
+      $('dupSkip').onclick = () => { $('dupDialog').hidden = true; resolve('cancel'); };
+    });
+  }
+
+  async function autoRenameKey(key) {
+    const dot = key.lastIndexOf('.');
+    const stem = dot > 0 ? key.slice(0, dot) : key;
+    const ext = dot > 0 ? key.slice(dot) : '';
+    for (let n = 1; n < 1000; n++) {
+      const cand = `${stem} (${n})${ext}`;
+      if (await headP(cand) === 'free') return cand;
+    }
+    return `${stem}_${Date.now()}${ext}`;
+  }
+
+  async function resolveCollisions(pairs) {
+    const collided = [];
+    for (const p of pairs) {
+      if (await headP(p.targetKey) === 'exists') collided.push(p.targetKey);
+    }
+    if (!collided.length) return { action: 'go', map: {} };
+    const action = await askDialog(`目标位置已有 ${collided.length} 个同名文件，如何处理？`, { cancel: '取消' });
+    if (action === 'cancel') return { action: 'cancel', map: {} };
+    if (action === 'overwrite') return { action: 'go', map: {} };
+    const map = {};
+    for (const t of collided) map[t] = await autoRenameKey(t);
+    return { action: 'go', map };
+  }
+
   async function listAllKeys(prefix) {
     const all = [];
     let marker = '';
@@ -832,10 +900,13 @@ h1 { margin: 0; font-size: 20px; }
     if (!newPrefix || newPrefix === oldPrefix) return;
     const keys = await listAllKeys(oldPrefix);
     const files = keys.filter((k) => !k.endsWith('/'));
+    const pairs = files.map((k) => ({ key: k, targetKey: newPrefix + k.slice(oldPrefix.length) }));
+    const { action, map } = await resolveCollisions(pairs);
+    if (action === 'cancel') return toast('已取消');
     try {
-      for (let i = 0; i < files.length; i++) {
-        await copyP(files[i], newPrefix + files[i].slice(oldPrefix.length));
-        if (i % 5 === 0 || i === files.length - 1) toast(`移动中 ${i + 1}/${files.length}`);
+      for (let i = 0; i < pairs.length; i++) {
+        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
+        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
       }
       await deleteKeysP(files);
       if (keys.includes(oldPrefix)) await deleteKeysP([oldPrefix]);
@@ -892,10 +963,13 @@ h1 { margin: 0; font-size: 20px; }
     if (raw === null) return;
     const target = sanitizeName(raw);
     const targetPrefix = (target ? galleryPrefix + target : cfg.prefix) + '/';
+    const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
+    const { action, map } = await resolveCollisions(pairs);
+    if (action === 'cancel') return toast('已取消');
     try {
-      for (let i = 0; i < keys.length; i++) {
-        await copyP(keys[i], targetPrefix + keys[i].split('/').pop());
-        if (i % 5 === 0 || i === keys.length - 1) toast(`移动中 ${i + 1}/${keys.length}`);
+      for (let i = 0; i < pairs.length; i++) {
+        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
+        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
       }
       await deleteKeysP(keys);
       toast('移动完成');
