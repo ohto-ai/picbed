@@ -213,9 +213,11 @@ h1 { margin: 0; font-size: 20px; }
   </header>
 
   <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
 
   <div class="gallery-toolbar">
     <button id="uploadBtn" class="btn primary">⬆️ 上传到当前目录</button>
+    <button id="uploadDirBtn" class="btn">📂 上传文件夹</button>
     <button id="newAlbumBtn" class="btn">📁 新建相册</button>
     <button id="selectModeBtn" class="btn">☑️ 多选</button>
     <button id="refreshGallery" class="btn">🔄 刷新</button>
@@ -223,7 +225,7 @@ h1 { margin: 0; font-size: 20px; }
     <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
     <span id="galleryCount"></span>
   </div>
-  <div class="gallery-hint">拖拽图片到页面任意位置即可上传 · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
+  <div class="gallery-hint">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
   <div class="urlbar">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
@@ -262,7 +264,7 @@ h1 { margin: 0; font-size: 20px; }
     <div class="drop-overlay-box">
       <div class="dz-icon">⬆️</div>
       <p id="dropTargetLabel">松开鼠标，上传到当前目录</p>
-      <p class="dz-hint">支持批量 · Ctrl+V 粘贴也可以</p>
+      <p class="dz-hint">支持整个文件夹（自动递归、仅图片）· 支持批量 · Ctrl+V 粘贴也可以</p>
     </div>
   </div>
 </div>
@@ -424,16 +426,21 @@ h1 { margin: 0; font-size: 20px; }
     return { url, markdown: `![${alt}](${url})`, html: `<img src="${url}" alt="${alt}" />` };
   }
 
-  function makeKey(fileName, type) {
-    let name = String(fileName || '').trim().replace(/[\\/:*?"<>|]+/g, '_');
-    if (!name || name === '_') {
-      const TYPE_EXT = {
-        'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
-        'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
-      };
-      name = 'image_' + Math.random().toString(36).slice(2, 8) + '.' + (TYPE_EXT[type] || 'bin');
-    }
-    return galleryPrefix + name;
+  const TYPE_EXT_MAP = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+    'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
+  };
+
+  function sanitizeSegment(seg) {
+    return String(seg || '').trim().replace(/[\\:*?"<>|]+/g, '_').replace(/^\.+$/, '');
+  }
+
+  // relPath 支持子目录（文件夹上传时保留目录结构）
+  function makeKey(relPath, type) {
+    const parts = String(relPath || '').replace(/\\/g, '/').split('/').filter(Boolean).map(sanitizeSegment).filter(Boolean);
+    let name = parts.pop() || '';
+    if (!name || name === '_') name = 'image_' + Math.random().toString(36).slice(2, 8) + '.' + (TYPE_EXT_MAP[type] || 'bin');
+    return galleryPrefix + (parts.length ? parts.join('/') + '/' : '') + name;
   }
 
   function errMsg(e) {
@@ -491,13 +498,63 @@ h1 { margin: 0; font-size: 20px; }
   function addFiles(files) {
     if (!needWorker()) return;
     let added = 0;
+    let skippedNonImage = 0;
+    let skippedTooBig = 0;
     for (const f of files) {
-      if (!isImageFile(f)) { toast(`跳过非图片文件：${f.name}`, true); continue; }
-      if (f.size > 50 * 1024 * 1024) { toast(`${f.name} 超过 50MB，已跳过`, true); continue; }
+      if (!isImageFile(f)) { skippedNonImage++; continue; }
+      if (f.size > 50 * 1024 * 1024) { skippedTooBig++; continue; }
       enqueue(f);
       added++;
     }
+    if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
+    if (skippedTooBig) toast(`已跳过 ${skippedTooBig} 个超过 50MB 的文件`, true);
     if (added) processQueue();
+    else if (!skippedNonImage && !skippedTooBig) toast('没有找到可上传的图片', true);
+  }
+
+  // 递归收集拖入的文件夹里的图片（保留相对路径）
+  function readEntry(entry, parentPath, out) {
+    return new Promise((resolve) => {
+      if (!entry) return resolve();
+      if (entry.isFile) {
+        entry.file((f) => {
+          if (f && isImageFile(f)) {
+            try { Object.defineProperty(f, '__relPath', { value: parentPath + f.name }); } catch (e) {}
+            out.push(f);
+          }
+          resolve();
+        }, () => resolve());
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const sub = parentPath + entry.name + '/';
+        const readBatch = () => {
+          reader.readEntries(async (entries) => {
+            if (!entries || !entries.length) return resolve();
+            for (const e of entries) await readEntry(e, sub, out);
+            readBatch(); // readEntries 每次最多返回 100 项，需要反复读直到为空
+          }, () => resolve());
+        };
+        readBatch();
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  async function collectFromDataTransfer(dt) {
+    const out = [];
+    const items = dt && dt.items ? [...dt.items] : [];
+    const entries = items
+      .filter((it) => it.kind === 'file' && typeof it.webkitGetAsEntry === 'function')
+      .map((it) => { try { return it.webkitGetAsEntry(); } catch (e) { return null; } })
+      .filter(Boolean);
+    if (entries.length) {
+      const hasDir = entries.some((e) => e && e.isDirectory);
+      if (hasDir) toast('正在扫描文件夹…');
+      for (const e of entries) await readEntry(e, '', out);
+      return out;
+    }
+    return [...((dt && dt.files) || [])];
   }
 
   function enqueue(file) {
@@ -510,7 +567,8 @@ h1 { margin: 0; font-size: 20px; }
     body.className = 'q-body';
     const name = document.createElement('div');
     name.className = 'q-name';
-    name.textContent = file.name;
+    name.textContent = file.__relPath || file.name;
+    name.title = name.textContent;
     const bar = document.createElement('div');
     bar.className = 'q-bar';
     const fill = document.createElement('div');
@@ -531,11 +589,12 @@ h1 { margin: 0; font-size: 20px; }
   }
 
   async function uploadFile(file, fill, status, dupCtx) {
-    let key = makeKey(file.name, file.type);
+    const relPath = file.__relPath || file.name;
+    let key = makeKey(relPath, file.type);
     if ((await headP(key)).state === 'exists') {
       let action = dupCtx.action;
       if (!action) {
-        const res = await askDialog(`当前目录已有「${file.name}」，如何处理？`, { cancel: '跳过', file, oldKey: key });
+        const res = await askDialog(`目标位置已有「${relPath}」，如何处理？`, { cancel: '跳过', file, oldKey: key });
         action = res.action;
         if (res.applyAll) dupCtx.action = action;
       }
@@ -1181,6 +1240,19 @@ h1 { margin: 0; font-size: 20px; }
   // 选择文件与全页拖放上传
   $('uploadBtn').onclick = () => $('fileInput').click();
   $('fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  // 文件夹上传：webkitRelativePath 形如 "我的相册/2024/a.jpg"
+  $('uploadDirBtn').onclick = () => $('dirInput').click();
+  $('dirInput').onchange = (e) => {
+    const files = [...e.target.files];
+    for (const f of files) {
+      // 保留最外层文件夹名：选「我的相册」→ 当前目录下生成「我的相册」相册
+      const rel = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
+      try { Object.defineProperty(f, '__relPath', { value: rel }); } catch (err) {}
+    }
+    if (files.length) toast(`正在扫描文件夹…（${files.length} 个文件）`);
+    addFiles(files);
+    e.target.value = '';
+  };
   let dragDepth = 0;
   window.addEventListener('dragenter', (e) => {
     if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files')) return;
@@ -1197,11 +1269,11 @@ h1 { margin: 0; font-size: 20px; }
     dragDepth = Math.max(0, dragDepth - 1);
     if (dragDepth === 0) $('dropOverlay').hidden = true;
   });
-  window.addEventListener('drop', (e) => {
+  window.addEventListener('drop', async (e) => {
     e.preventDefault();
     dragDepth = 0;
     $('dropOverlay').hidden = true;
-    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    const files = await collectFromDataTransfer(e.dataTransfer);
     if (files.length) addFiles(files);
   });
 
