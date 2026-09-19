@@ -99,11 +99,10 @@ async function tc3Request(secretId, secretKey, action, version, payload, region)
   return data.Response;
 }
 
-// 临时密钥策略：仅允许对 PREFIX 目录做上传/删除等对象操作，
-// GetBucket 供相册列出文件用（桶是公有读，列出并不泄露更多内容）
+// 临时密钥策略：仅允许对 PREFIX 目录做上传/删除等对象操作
+// （相册列表走 /list 接口，由 Worker 用长期密钥直接调用 COS，不经过临时密钥）
 function buildPolicy(env) {
-  const bucketResource = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}`;
-  const prefixResource = `${bucketResource}/${env.PREFIX}/*`;
+  const prefixResource = `qcs::cos:${env.REGION}:uid/${env.APPID}:${env.BUCKET}/${env.PREFIX}/*`;
   return {
     version: '2.0',
     statement: [
@@ -121,11 +120,6 @@ function buildPolicy(env) {
           'name/cos:ListParts',
         ],
         resource: [prefixResource],
-      },
-      {
-        effect: 'allow',
-        action: ['name/cos:GetBucket', 'name/cos:ListMultipartUploads'],
-        resource: [bucketResource],
       },
     ],
   };
@@ -174,6 +168,54 @@ async function cosPut(env, key, body, contentType) {
     body,
   });
   if (!resp.ok) throw new Error(`COS 上传失败 HTTP ${resp.status}`);
+}
+
+// ---------- 列出目录（Worker 用长期密钥调用 COS ListObjects） ----------
+function unescapeXml(s) {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+async function cosList(env, marker) {
+  const host = `${env.BUCKET}.cos.${env.REGION}.myqcloud.com`;
+  const params = [['prefix', env.PREFIX + '/'], ['max-keys', '500']];
+  if (marker) params.push(['marker', String(marker)]);
+  const sorted = params.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const queryString = sorted.map(([k, v]) => `${camSafeUrlEncode(k)}=${camSafeUrlEncode(v)}`).join('&');
+  const paramList = sorted.map(([k]) => k).join(';');
+
+  const now = Math.floor(Date.now() / 1000);
+  const keyTime = `${now - 60};${now + 600}`;
+  const httpHeaders = `host=${host}`;
+  const httpString = `get\n/\n${queryString}\n${httpHeaders}\n`;
+  const stringToSign = `sha1\n${keyTime}\n${await digestHex('SHA-1', httpString)}\n`;
+  const signKey = await hmac(env.TENCENT_SECRET_KEY, keyTime, 'SHA-1');
+  const signature = bufToHex(await hmac(signKey, stringToSign, 'SHA-1'));
+  const authorization = `q-sign-algorithm=sha1&q-ak=${env.TENCENT_SECRET_ID}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=host&q-url-param-list=${paramList}&q-signature=${signature}`;
+
+  const resp = await fetch(`https://${host}/?${queryString}`, { headers: { Authorization: authorization } });
+  const xml = await resp.text();
+  if (!resp.ok) {
+    const code = /<Code>([\s\S]*?)<\/Code>/.exec(xml)?.[1] || '';
+    const msg = /<Message>([\s\S]*?)<\/Message>/.exec(xml)?.[1] || '';
+    throw new Error(`COS 列表失败 HTTP ${resp.status} (${code}: ${msg})`);
+  }
+  const truncated = /<IsTruncated>([\s\S]*?)<\/IsTruncated>/.exec(xml)?.[1] === 'true';
+  const nextMarker = unescapeXml(/<NextMarker>([\s\S]*?)<\/NextMarker>/.exec(xml)?.[1] || '');
+  const items = [];
+  const re = /<Contents>([\s\S]*?)<\/Contents>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const key = unescapeXml(/<Key>([\s\S]*?)<\/Key>/.exec(m[1])?.[1] || '');
+    const size = Number(/<Size>([\s\S]*?)<\/Size>/.exec(m[1])?.[1] || 0);
+    const lastModified = /<LastModified>([\s\S]*?)<\/LastModified>/.exec(m[1])?.[1] || '';
+    if (key) items.push({ key, size, lastModified });
+  }
+  return { items, truncated, nextMarker };
 }
 
 // ---------- 远程图片转存 ----------
@@ -276,6 +318,15 @@ export default {
       if (url.pathname === '/url' && request.method === 'POST') {
         if (!checkPassword(request, env)) return jsonErr(403, '密码错误');
         return await handleUrl(request, env);
+      }
+      if (url.pathname === '/list' && request.method === 'GET') {
+        if (!checkPassword(request, env)) return jsonErr(403, '密码错误');
+        try {
+          const marker = url.searchParams.get('marker') || '';
+          return json(await cosList(env, marker));
+        } catch (e) {
+          return jsonErr(502, e.message);
+        }
       }
       return jsonErr(404, 'Not Found');
     } catch (e) {

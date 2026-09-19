@@ -337,6 +337,12 @@ h1 { margin: 0; font-size: 20px; }
     return h;
   }
 
+  function listHeaders() {
+    const h = {};
+    if (cfg.password) h['x-picbed-key'] = cfg.password;
+    return h;
+  }
+
   function baseUrl() {
     return (cfg.customDomain || `https://${cfg.bucket}.cos.${cfg.region}.myqcloud.com`).replace(/\/+$/, '');
   }
@@ -602,7 +608,7 @@ h1 { margin: 0; font-size: 20px; }
   let galleryLoaded = 0;
   let galleryInitialized = false;
 
-  function loadGallery(reset) {
+  async function loadGallery(reset) {
     if (!needWorker()) return;
     if (reset) {
       galleryMarker = '';
@@ -612,36 +618,36 @@ h1 { margin: 0; font-size: 20px; }
     const btn = $('loadMore');
     btn.disabled = true;
     btn.textContent = '加载中…';
-    cos.getBucket({
-      Bucket: cfg.bucket,
-      Region: cfg.region,
-      Prefix: cfg.prefix + '/',
-      MaxKeys: cfg.maxKeys || 500,
-      Marker: galleryMarker,
-    }, (err, data) => {
-      btn.disabled = false;
-      btn.textContent = '加载更多';
-      if (err) return toast('加载相册失败：' + (err.message || err), true);
-      const items = (data.Contents || []).filter((c) => !c.Key.endsWith('/')).reverse();
+    try {
+      const qs = galleryMarker ? '?marker=' + encodeURIComponent(galleryMarker) : '';
+      const res = await fetch(`${cfg.worker}/list${qs}`, { headers: listHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '加载相册失败');
+      const items = (data.items || []).filter((it) => !it.key.endsWith('/')).reverse();
       for (const it of items) $('galleryGrid').appendChild(renderGridItem(it));
       galleryLoaded += items.length;
       $('galleryCount').textContent = `已显示 ${galleryLoaded} 张`;
-      galleryMarker = String(data.IsTruncated) === 'true' ? data.NextMarker : '';
+      galleryMarker = data.truncated ? data.nextMarker : '';
       btn.hidden = !galleryMarker;
-    });
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '加载更多';
+    }
   }
 
   function renderGridItem(it) {
     const fig = document.createElement('figure');
     const img = document.createElement('img');
     img.loading = 'lazy';
-    img.src = publicUrl(it.Key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
+    img.src = publicUrl(it.key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
     img.onerror = () => {
-      if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.Key); }
+      if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.key); }
       else fig.remove();
     };
     const cap = document.createElement('figcaption');
-    cap.textContent = it.Key.split('/').pop();
+    cap.textContent = it.key.split('/').pop();
     fig.append(img, cap);
     fig.onclick = () => openLightbox(it);
     return fig;
@@ -652,11 +658,11 @@ h1 { margin: 0; font-size: 20px; }
 
   function openLightbox(item) {
     lightboxItem = item;
-    const url = publicUrl(item.Key);
+    const url = publicUrl(item.key);
     $('lightboxImg').src = url;
-    $('lightboxName').textContent = item.Key;
+    $('lightboxName').textContent = item.key;
     document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
-      b.onclick = () => copyText(makeLinks(url, item.Key.split('/').pop())[b.dataset.fmt]);
+      b.onclick = () => copyText(makeLinks(url, item.key.split('/').pop())[b.dataset.fmt]);
     });
     $('lightbox').hidden = false;
   }
@@ -768,7 +774,7 @@ h1 { margin: 0; font-size: 20px; }
   $('clearHistory').onclick = () => { history = []; persistHistory(); renderHistory(); };
   $('deleteBtn').onclick = () => {
     if (!lightboxItem || !confirm('确定删除这张图片？此操作不可恢复。')) return;
-    cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: lightboxItem.Key }, (err) => {
+    cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: lightboxItem.key }, (err) => {
       if (err) return toast('删除失败：' + (err.message || err), true);
       toast('已删除（走 CDN 的话缓存可能仍短暂可见）');
       closeLightbox();
