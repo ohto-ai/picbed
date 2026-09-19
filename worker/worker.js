@@ -291,12 +291,19 @@ async function probePermissions(env) {
   try {
     await cosList(env, '');
   } catch (e) {
-    longKeyList = e.message.slice(0, 120);
+    longKeyList = e.message.slice(0, 600);
   }
+  // Workers 加密原语自检：固定输入的标准结果见 Node 对照
+  const cryptoSelfTest = {
+    sha1: await digestHex('SHA-1', 'picbed-test-data'),
+    hmacSha1: bufToHex(await hmac('picbed-test-key', 'picbed-test-data', 'SHA-1')),
+    hmacSha256: bufToHex(await hmac('picbed-test-key', 'picbed-test-data', 'SHA-256')),
+  };
   return json({
     token: 'ok',
-    listGetBucket: list.status,
-    headObjectOnPrefix: head.status,
+    cryptoSelfTest,
+    listGetBucket: { status: list.status, body: list.body },
+    headObjectOnPrefix: { status: head.status, body: head.body },
     longKeyListError: longKeyList,
   });
 }
