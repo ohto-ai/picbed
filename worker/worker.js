@@ -60,6 +60,14 @@ async function digestHex(algo, data) {
   return bufToHex(await crypto.subtle.digest(algo, bytes(data)));
 }
 
+// COS q-sign 的 SignKey 必须是第一次 HMAC 的「十六进制字符串」，不是原始字节：
+//   SignKey   = hex(HMAC-SHA1(SecretKey, KeyTime))
+//   Signature = hex(HMAC-SHA1(SignKey, StringToSign))
+// 用原始字节算出来的签名会被 COS 判为 SignatureDoesNotMatch。
+async function signKeyHex(key, keyTime) {
+  return bufToHex(await hmac(key, keyTime, 'SHA-1'));
+}
+
 // 腾讯云 COS 的 URL 编码：仅保留 RFC3986 非保留字符
 function camSafeUrlEncode(str) {
   return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
@@ -164,7 +172,7 @@ async function cosPut(env, key, body, contentType) {
   const httpHeaders = `content-length=${contentLength}&content-type=${camSafeUrlEncode(contentType)}&host=${host}`;
   const httpString = `put\n${uri}\n\n${httpHeaders}\n`;
   const stringToSign = `sha1\n${keyTime}\n${await digestHex('SHA-1', httpString)}\n`;
-  const signKey = await hmac(env.TENCENT_SECRET_KEY, keyTime, 'SHA-1');
+  const signKey = await signKeyHex(env.TENCENT_SECRET_KEY, keyTime);
   const signature = bufToHex(await hmac(signKey, stringToSign, 'SHA-1'));
   const authorization = `q-sign-algorithm=sha1&q-ak=${env.TENCENT_SECRET_ID}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=content-length;content-type;host&q-url-param-list=&q-signature=${signature}`;
 
@@ -207,7 +215,7 @@ async function cosList(env, opts) {
   const httpHeaders = `host=${host}`;
   const httpString = `get\n/\n${queryString}\n${httpHeaders}\n`;
   const stringToSign = `sha1\n${keyTime}\n${await digestHex('SHA-1', httpString)}\n`;
-  const signKey = await hmac(env.TENCENT_SECRET_KEY, keyTime, 'SHA-1');
+  const signKey = await signKeyHex(env.TENCENT_SECRET_KEY, keyTime);
   const signature = bufToHex(await hmac(signKey, stringToSign, 'SHA-1'));
   const authorization = `q-sign-algorithm=sha1&q-ak=${env.TENCENT_SECRET_ID}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=host&q-url-param-list=${paramList}&q-signature=${signature}`;
 
@@ -308,7 +316,7 @@ async function cosSigned(env, cred, method, uri, params) {
   const headerList = headerKeys.join(';');
   const httpString = `${method.toLowerCase()}\n${uri}\n${queryString}\n${httpHeaders}\n`;
   const stringToSign = `sha1\n${keyTime}\n${await digestHex('SHA-1', httpString)}\n`;
-  const signKey = await hmac(cred.tmpSecretKey, keyTime, 'SHA-1');
+  const signKey = await signKeyHex(cred.tmpSecretKey, keyTime);
   const signature = bufToHex(await hmac(signKey, stringToSign, 'SHA-1'));
   const authorization = `q-sign-algorithm=sha1&q-ak=${cred.tmpSecretId}&q-sign-time=${keyTime}&q-key-time=${keyTime}&q-header-list=${headerList}&q-url-param-list=${paramList}&q-signature=${signature}`;
   const reqHeaders = {};
