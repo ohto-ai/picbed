@@ -3,7 +3,7 @@
 window.PICBED_CONFIG = {
   // 必填：Cloudflare Worker 地址（部署完 Worker 后填，形如 https://picbed-worker.xxx.workers.dev）
   // 不填也可以，首次打开页面时会弹出设置框
-  worker: 'https://picbed-worker.ohtoai02.workers.dev',
+  worker: 'https://picbed-worker.ohtoai.top',
 
   // 腾讯云 COS 存储桶信息（已按你的桶填好）
   bucket: 'album-1255316209',
