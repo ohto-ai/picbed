@@ -1706,11 +1706,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       }
       if (allowUpload && view === 'admin' && hasFilePayload(e.dataTransfer)) {
         e.preventDefault();
-        e.stopPropagation();
-        uploadTargetPrefix = null;
-        updateDropLabel();
+        e.stopPropagation(); // 拦住窗口处理器，否则同一批文件会上传两次
+        const target = getTargetPrefix();
+        endFileDrag(); // 拦下了窗口处理器，遮罩与拖拽状态得自己复位
         const files = await collectFromDataTransfer(e.dataTransfer);
-        if (files.length) addFiles(files, getTargetPrefix());
+        if (files.length) addFiles(files, target);
       }
     });
   }
@@ -2415,6 +2415,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('dropTargetLabel').textContent = `松开鼠标，上传到「${name}」`;
   }
   let dragDepth = 0;
+  // 结束一次文件拖放：隐藏遮罩并复位拖拽状态
+  function endFileDrag() {
+    dragDepth = 0;
+    $('dropOverlay').hidden = true;
+    uploadTargetPrefix = null; // 复位后后续拖拽默认「上传到当前相册」
+  }
   window.addEventListener('dragenter', (e) => {
     if (view !== 'admin') return; // 游客视图不接受上传
     if (!hasFilePayload(e.dataTransfer)) return;
@@ -2426,16 +2432,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('dragleave', () => {
     dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) {
-      $('dropOverlay').hidden = true;
-      uploadTargetPrefix = null;
-    }
+    if (dragDepth === 0) endFileDrag();
   });
   window.addEventListener('drop', async (e) => {
     e.preventDefault();
-    dragDepth = 0;
-    $('dropOverlay').hidden = true;
-    uploadTargetPrefix = null; // 拖到相册卡片之外时保持「上传到当前相册」
+    endFileDrag();
     if (view !== 'admin') return;
     const files = await collectFromDataTransfer(e.dataTransfer);
     if (files.length) addFiles(files);
