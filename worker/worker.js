@@ -9,6 +9,9 @@
  * 接口：
  *   POST/GET /token  返回受限的 COS 临时密钥（仅能操作 PREFIX 目录，30 分钟有效）
  *   POST /url        body { url }，抓取远程图片并转存到 COS（10MB 上限）
+ *   GET  /list       列出 PREFIX 下的对象（需密码，供前端构建相册目录树）
+ *   GET  /public     列出公开图片（无需密码）：img/_picbed/public/ 下的零字节标记
+ *                    镜像了「已设为公开」的图片相对键，前端据此渲染游客画廊
  */
 
 const MAX_BYTES = 10 * 1024 * 1024; // 转存单图上限 10MB
@@ -21,10 +24,10 @@ const CORS = {
   'Access-Control-Max-Age': '86400',
 };
 
-function json(data, status = 200) {
+function json(data, status = 200, extra) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS },
+    headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS, ...(extra || {}) },
   });
 }
 
@@ -187,10 +190,14 @@ function unescapeXml(s) {
     .replace(/&amp;/g, '&');
 }
 
-async function cosList(env, marker) {
+async function cosList(env, opts) {
+  const o = opts || {};
+  const prefix = o.prefix || (env.PREFIX + '/');
+  const maxKeys = Math.min(Math.max(Number(o.maxKeys) || 500, 1), 1000);
   const host = `${env.BUCKET}.cos.${env.REGION}.myqcloud.com`;
-  const params = [['prefix', env.PREFIX + '/'], ['max-keys', '500']];
-  if (marker) params.push(['marker', String(marker)]);
+  const params = [['prefix', prefix], ['max-keys', String(maxKeys)]];
+  if (o.marker) params.push(['marker', String(o.marker)]);
+  if (o.delimiter) params.push(['delimiter', String(o.delimiter)]);
   const sorted = params.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const queryString = sorted.map(([k, v]) => `${camSafeUrlEncode(k)}=${camSafeUrlEncode(v)}`).join('&');
   const paramList = sorted.map(([k]) => k).join(';');
@@ -234,7 +241,52 @@ async function cosList(env, marker) {
     const lastModified = /<LastModified>([\s\S]*?)<\/LastModified>/.exec(m[1])?.[1] || '';
     if (key) items.push({ key, size, lastModified });
   }
-  return { items, truncated, nextMarker };
+  // 指定 Delimiter 时 COS 会把「目录」折叠为 CommonPrefixes，相册树依赖它
+  const commonPrefixes = [];
+  const cpre = /<CommonPrefixes>([\s\S]*?)<\/CommonPrefixes>/g;
+  let cm;
+  while ((cm = cpre.exec(xml))) {
+    const p = unescapeXml(/<Prefix>([\s\S]*?)<\/Prefix>/.exec(cm[1])?.[1] || '');
+    if (p) commonPrefixes.push(p);
+  }
+  return { items, commonPrefixes, truncated, nextMarker };
+}
+
+// ---------- 公开画廊（无需密码） ----------
+// 约定：img/_picbed/public/<相对键> 的零字节标记对象表示该图片「公开」。
+// 该目录下的 CommonPrefixes 即游客可见的相册结构。
+const PUBLIC_SEG = '_picbed/public/';
+
+function publicRoot(env) {
+  return env.PREFIX + '/' + PUBLIC_SEG;
+}
+
+// 规范化相册相对路径；含 . 或 .. 段视为非法
+function safeRelPrefix(raw) {
+  const segs = String(raw || '').replace(/^\/+/, '').split('/').filter(Boolean);
+  if (segs.some((s) => s === '.' || s === '..')) return null;
+  return segs.length ? segs.join('/') + '/' : '';
+}
+
+async function handlePublic(url, env) {
+  const rel = safeRelPrefix(url.searchParams.get('prefix'));
+  if (rel === null) return jsonErr(400, '非法的相册路径');
+  const root = publicRoot(env);
+  const marker = url.searchParams.get('marker') || '';
+  const maxKeys = Math.min(Math.max(Number(url.searchParams.get('max-keys')) || 500, 1), 1000);
+  const data = await cosList(env, { prefix: root + rel, marker, delimiter: '/', maxKeys });
+  const folders = (data.commonPrefixes || [])
+    .filter((p) => p.startsWith(root) && p.length > root.length)
+    .map((p) => p.slice(root.length));
+  const files = (data.items || [])
+    .filter((it) => it.key.startsWith(root) && it.key !== root + rel && !it.key.endsWith('/'))
+    .map((it) => ({ key: it.key.slice(root.length) }));
+  // 公开状态可能随时切换，不做缓存
+  return json(
+    { folders, files, truncated: data.truncated, nextMarker: data.nextMarker },
+    200,
+    { 'Cache-Control': 'no-store' }
+  );
 }
 
 // ---------- 权限探针（临时调试用） ----------
@@ -296,7 +348,7 @@ async function probePermissions(env) {
   const head = await cosSigned(env, cred, 'HEAD', `/${env.PREFIX}/__probe_nonexist__.txt`, {});
   let longKeyList = 'ok';
   try {
-    await cosList(env, '');
+    await cosList(env, { prefix: env.PREFIX + '/' });
   } catch (e) {
     longKeyList = e.message.slice(0, 600);
   }
@@ -420,7 +472,15 @@ export default {
         if (!checkPassword(request, env)) return jsonErr(403, '密码错误');
         try {
           const marker = url.searchParams.get('marker') || '';
-          return json(await cosList(env, marker));
+          return json(await cosList(env, { prefix: env.PREFIX + '/', marker }));
+        } catch (e) {
+          return jsonErr(502, e.message);
+        }
+      }
+      // 公开画廊：游客可访问，只暴露 img/_picbed/public/ 下的公开标记
+      if (url.pathname === '/public' && request.method === 'GET') {
+        try {
+          return await handlePublic(url, env);
         } catch (e) {
           return jsonErr(502, e.message);
         }

@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir -p _site
           rsync -a --exclude '.git' --exclude '.github' --exclude 'worker' \
-            --exclude 'README.md' --exclude '.gitignore' --exclude '_site' \
+            --exclude 'scripts' --exclude 'README.md' --exclude '.gitignore' --exclude '_site' \
             ./ _site/
 
       - uses: actions/upload-pages-artifact@v3

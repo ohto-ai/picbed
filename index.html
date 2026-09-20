@@ -47,11 +47,18 @@ body {
 .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px 64px; }
 
 /* 头部 */
-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 12px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 20px 0 12px; }
 .brand { display: flex; align-items: center; gap: 12px; }
 .logo { font-size: 30px; }
 h1 { margin: 0; font-size: 20px; }
 .brand p { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* 视图切换（公开 / 我的相册） */
+.tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+.tabs button { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 6px 14px; border-radius: 8px; white-space: nowrap; }
+.tabs button:hover { color: var(--text); }
+.tabs button.active { background: var(--accent); color: #fff; }
+.view-public .admin-only { display: none !important; }
 
 /* 按钮 */
 .btn {
@@ -154,6 +161,13 @@ h1 { margin: 0; font-size: 20px; }
 .folder-tile .folder-actions button { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.gallery-meta { font-size: 12px; color: var(--muted); margin: -4px 0 10px; min-height: 18px; }
+.gallery-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13px; padding: 28px 8px; }
+/* 图片卡片上的公开切换按钮 */
+.grid figure .pub-toggle { position: absolute; top: 6px; right: 6px; z-index: 2; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); opacity: 0; transition: opacity .12s; }
+.grid figure:hover .pub-toggle { opacity: 1; }
+.grid figure .pub-toggle.on { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
+.grid figure .pub-toggle:disabled { opacity: .5; cursor: not-allowed; }
 .grid figure { position: relative; margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: zoom-in; transition: transform .12s, box-shadow .12s; }
 .grid figure:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 .grid figure.selected { outline: 2px solid var(--accent); }
@@ -184,7 +198,22 @@ h1 { margin: 0; font-size: 20px; }
   color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; outline: none;
 }
 .field input:focus, .field select:focus { border-color: var(--accent); }
+.field .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger-solid:hover { filter: brightness(1.1); }
+
+/* 目录树（弹窗内选相册） */
+.tree { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin-top: 6px; background: var(--bg); }
+.tree ul { list-style: none; margin: 0; padding-left: 14px; }
+.tree > ul { padding-left: 0; }
+.tree-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
+.tree-row { display: flex; align-items: center; }
+.tree-caret { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 9px; padding: 3px 4px; line-height: 1; transition: transform .12s; }
+.tree-caret.open { transform: rotate(90deg); }
+.tree-caret.leaf { visibility: hidden; cursor: default; }
+.tree-label { border: none; background: none; color: var(--text); cursor: pointer; font-size: 13px; padding: 3px 6px; border-radius: 6px; text-align: left; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-label:hover { background: var(--accent-soft); color: var(--accent); }
 
 /* 灯箱 */
 .lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .75); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
@@ -203,6 +232,40 @@ h1 { margin: 0; font-size: 20px; }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.error { background: var(--danger); color: #fff; }
+
+/* 上传状态悬浮按钮 + 面板 */
+.upload-fab {
+  position: fixed; right: 20px; bottom: 24px; z-index: 40;
+  width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; font-size: 20px; cursor: pointer;
+  box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center;
+  transition: transform .12s, background .15s, border-color .15s;
+}
+.upload-fab:hover { transform: translateY(-2px); }
+.upload-fab.idle { background: var(--panel); color: var(--text); border-color: var(--border); }
+.fab-badge {
+  position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--danger); color: #fff; font-size: 11px; line-height: 20px;
+  text-align: center; font-weight: 600;
+}
+.fab-badge.ok { background: var(--ok); }
+.fab-badge.idle { display: none; }
+#panelBackdrop { position: fixed; inset: 0; z-index: 39; background: transparent; }
+.upload-panel {
+  position: fixed; right: 16px; bottom: 88px; z-index: 40;
+  width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 640px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 12px 14px;
+}
+.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.panel-head h2 { margin: 0; font-size: 15px; }
+.panel-badge { font-size: 12px; color: var(--muted); }
+.panel-close { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 7px; border-radius: 6px; }
+.panel-close:hover { background: var(--accent-soft); color: var(--text); }
+.upload-panel .history { margin-top: 14px; }
+.upload-panel .section-head { margin: 14px 0 8px; }
+.upload-panel .section-head h2 { font-size: 14px; }
+.upload-panel:empty { display: none; }
 </style>
 </head>
 <body>
@@ -215,13 +278,17 @@ h1 { margin: 0; font-size: 20px; }
         <p id="bucketInfo"></p>
       </div>
     </div>
-    <button id="settingsBtn" class="btn ghost">⚙️ 设置</button>
+    <nav id="viewTabs" class="tabs">
+      <button id="tabPublic">🌍 公开画廊</button>
+      <button id="tabAdmin">🔒 我的相册</button>
+    </nav>
+    <button id="settingsBtn" class="btn ghost admin-only">⚙️ 设置</button>
   </header>
 
   <input type="file" id="fileInput" accept="image/*" multiple hidden>
   <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
 
-  <div class="gallery-toolbar">
+  <div class="gallery-toolbar admin-only">
     <button id="uploadBtn" class="btn primary">⬆️ 上传到当前目录</button>
     <button id="uploadDirBtn" class="btn">📂 上传文件夹</button>
     <button id="newAlbumBtn" class="btn">📁 新建相册</button>
@@ -229,42 +296,27 @@ h1 { margin: 0; font-size: 20px; }
     <button id="refreshGallery" class="btn">🔄 刷新</button>
     <span class="gallery-spacer"></span>
     <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
-    <span id="galleryCount"></span>
   </div>
-  <div class="gallery-hint">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
+  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
-  <div class="urlbar">
+  <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
     <button id="urlBtn" class="btn">转存</button>
   </div>
 
-  <div id="bulkBar" class="bulk-bar" hidden>
+  <div id="bulkBar" class="bulk-bar admin-only" hidden>
     <span id="bulkCount"></span>
     <button id="bulkMoveBtn" class="btn small">📦 移动到相册</button>
+    <button id="bulkPublicBtn" class="btn small">🌍 设为公开</button>
     <button id="bulkDeleteBtn" class="btn small danger">批量删除</button>
     <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
   </div>
 
   <div id="galleryPath" class="gallery-path"></div>
+  <div class="gallery-meta"><span id="galleryCount"></span></div>
 
   <div id="galleryGrid" class="grid"></div>
   <div class="gallery-more"><button id="loadMore" class="btn" hidden>加载更多</button></div>
-
-  <div id="queue"></div>
-
-  <div id="resultsSection" hidden>
-    <div class="section-head">
-      <h2>本次上传</h2>
-      <button id="copyAllBtn" class="btn small">复制全部（当前格式）</button>
-    </div>
-    <div id="results" class="results"></div>
-  </div>
-
-  <details id="historyBox" class="history">
-    <summary>📋 上传历史（仅存本机浏览器）</summary>
-    <div class="history-toolbar"><button id="clearHistory" class="btn small danger">清空记录</button></div>
-    <ul id="historyList"></ul>
-  </details>
 
   <div id="dropOverlay" hidden>
     <div class="drop-overlay-box">
@@ -274,6 +326,33 @@ h1 { margin: 0; font-size: 20px; }
     </div>
   </div>
 </div>
+
+<div id="panelBackdrop" class="admin-only" hidden></div>
+<div id="uploadPanel" class="upload-panel admin-only" hidden>
+  <div class="panel-head">
+    <h2>⬆️ 上传</h2>
+    <span id="panelBadge" class="panel-badge"></span>
+    <span class="gallery-spacer"></span>
+    <button id="panelClose" class="panel-close" title="收起">✕</button>
+  </div>
+  <div id="queue"></div>
+  <div id="resultsSection" hidden>
+    <div class="section-head">
+      <h2>本次上传</h2>
+      <button id="copyAllBtn" class="btn small">复制全部（当前格式）</button>
+    </div>
+    <div id="results" class="results"></div>
+  </div>
+  <details id="historyBox" class="history">
+    <summary>📋 上传历史（仅存本机浏览器）</summary>
+    <div class="history-toolbar"><button id="clearHistory" class="btn small danger">清空记录</button></div>
+    <ul id="historyList"></ul>
+  </details>
+</div>
+<button id="uploadFab" class="upload-fab idle admin-only" title="上传状态" hidden>
+  <span>⬆️</span>
+  <span id="fabBadge" class="fab-badge idle"></span>
+</button>
 
 <div id="settingsDialog" class="dialog" hidden>
   <div class="dialog-box">
@@ -330,6 +409,35 @@ h1 { margin: 0; font-size: 20px; }
   </div>
 </div>
 
+<div id="promptDialog" class="dialog" hidden>
+  <div class="dialog-box">
+    <h2 id="promptTitle">输入</h2>
+    <label class="field"><span id="promptLabel">内容</span>
+      <input id="promptInput" type="text" autocomplete="off" spellcheck="false">
+      <span id="promptHelp" class="hint"></span>
+    </label>
+    <div id="promptTreeWrap" hidden>
+      <div class="hint" style="margin-bottom:2px;">点击下方相册可把路径填入输入框</div>
+      <div id="promptTree" class="tree"></div>
+    </div>
+    <div class="dialog-actions">
+      <button id="promptOk" class="btn primary">确定</button>
+      <button id="promptCancel" class="btn ghost">取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirmDialog" class="dialog" hidden>
+  <div class="dialog-box">
+    <h2 id="confirmTitle">确认</h2>
+    <p id="confirmMsg"></p>
+    <div class="dialog-actions">
+      <button id="confirmOk" class="btn danger-solid">删除</button>
+      <button id="confirmCancel" class="btn ghost">取消</button>
+    </div>
+  </div>
+</div>
+
 <div id="lightbox" class="lightbox" hidden>
   <div class="lightbox-box">
     <button id="lightboxClose" class="lightbox-close" title="关闭">✕</button>
@@ -340,6 +448,7 @@ h1 { margin: 0; font-size: 20px; }
         <button class="btn small" data-fmt="url">URL</button>
         <button class="btn small" data-fmt="markdown">Markdown</button>
         <button class="btn small" data-fmt="html">HTML</button>
+        <button class="btn small" id="togglePublicBtn">🌍 设为公开</button>
         <button class="btn small danger" id="deleteBtn">删除</button>
       </div>
     </div>
@@ -506,16 +615,26 @@ h1 { margin: 0; font-size: 20px; }
     let added = 0;
     let skippedNonImage = 0;
     let skippedTooBig = 0;
+    let skippedReserved = 0;
     for (const f of files) {
       if (!isImageFile(f)) { skippedNonImage++; continue; }
       if (f.size > 50 * 1024 * 1024) { skippedTooBig++; continue; }
+      // _picbed 为公开标记的保留命名空间，禁止上传进去
+      const rel = String(f.__relPath || f.name).replace(/\\/g, '/');
+      if (hasReservedSegment(rel.split('/').slice(0, -1).join('/')) || hasReservedSegment(galleryPrefix)) {
+        skippedReserved++;
+        continue;
+      }
       enqueue(f);
       added++;
     }
     if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
     if (skippedTooBig) toast(`已跳过 ${skippedTooBig} 个超过 50MB 的文件`, true);
-    if (added) processQueue();
-    else if (!skippedNonImage && !skippedTooBig) toast('没有找到可上传的图片', true);
+    if (skippedReserved) toast(`已跳过 ${skippedReserved} 个位于保留目录 _picbed 的文件`, true);
+    if (added) {
+      openPanel(); // 开始上传时自动展开进度面板
+      processQueue();
+    } else if (!skippedNonImage && !skippedTooBig && !skippedReserved) toast('没有找到可上传的图片', true);
   }
 
   // 递归收集拖入的文件夹里的图片（保留相对路径）
@@ -591,10 +710,12 @@ h1 { margin: 0; font-size: 20px; }
       thumb.onload = () => URL.revokeObjectURL(u);
     }
     $('queue').appendChild(row);
-    queue.push({ file, row, fill, status, done: false });
+    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0 });
+    updateUploadFab();
   }
 
-  async function uploadFile(file, fill, status, dupCtx) {
+  async function uploadFile(file, item, dupCtx) {
+    const { fill, status } = item;
     const relPath = file.__relPath || file.name;
     let key = makeKey(relPath, file.type);
     if ((await headP(key)).state === 'exists') {
@@ -617,8 +738,10 @@ h1 { margin: 0; font-size: 20px; }
         ContentType: file.type || TYPE_BY_EXT[ext] || 'image/png',
         onProgress(p) {
           const pct = Math.min(100, Math.round((p.percent || 0) * 100));
+          item.pct = pct;
           fill.style.width = pct + '%';
           status.textContent = pct >= 100 ? '处理中…' : pct + '%';
+          updateUploadFab();
         },
       }, (err) => {
         if (err) return reject(err);
@@ -635,39 +758,48 @@ h1 { margin: 0; font-size: 20px; }
     try {
       for (const item of queue) {
         if (item.done) continue;
+        item.pct = 0;
         item.status.textContent = '上传中…';
         try {
-          const url = await uploadFile(item.file, item.fill, item.status, dupCtx);
+          const url = await uploadFile(item.file, item, dupCtx);
           item.done = true;
           if (url && url.skipped) {
             item.status.textContent = '已跳过（同名文件）';
             item.row.classList.add('done');
+            updateUploadFab();
             await sleep(350);
             item.row.remove();
             continue;
           }
           uploadedAny = true;
+          item.pct = 100;
           item.fill.style.width = '100%';
           item.status.textContent = '完成';
           item.row.classList.add('done');
           addResult(url, item.file.name);
           saveHistory(url, item.file.name);
+          updateUploadFab();
           await sleep(350);
           item.row.remove();
         } catch (e) {
           console.error('[picbed] 上传失败:', e);
+          item.failed = true;
           item.status.textContent = '失败：' + errMsg(e) + '（点此重试）';
           item.row.classList.add('error');
           item.status.onclick = () => {
             item.status.onclick = null;
+            item.failed = false;
             item.status.textContent = '重试中…';
             item.row.classList.remove('error');
+            updateUploadFab();
             processQueue();
           };
+          updateUploadFab();
         }
       }
     } finally {
       processing = false;
+      updateUploadFab();
       if (uploadedAny) loadGallery(true);
     }
   }
@@ -701,6 +833,7 @@ h1 { margin: 0; font-size: 20px; }
     info.append(nameEl, btns);
     box.append(img, info);
     $('results').prepend(box);
+    updateUploadFab();
   }
 
   function copyAllResults() {
@@ -730,6 +863,7 @@ h1 { margin: 0; font-size: 20px; }
       li.className = 'empty';
       li.textContent = '暂无记录';
       ul.appendChild(li);
+      updateUploadFab();
       return;
     }
     for (const h of history) {
@@ -760,6 +894,61 @@ h1 { margin: 0; font-size: 20px; }
       li.append(name, time, btns);
       ul.appendChild(li);
     }
+    updateUploadFab();
+  }
+
+  // ---------- 上传状态面板（右下悬浮按钮） ----------
+  // 视图模式：'admin' = 管理视图，'public' = 游客公开视图（见 switchView）
+  // 本机已保存密码则直接进管理视图，否则默认展示公开画廊
+  let view = (cfg.password && cfg.worker) ? 'admin' : 'public';
+  let panelOpen = false;
+
+  function openPanel() {
+    if (view !== 'admin') return;
+    panelOpen = true;
+    $('uploadPanel').hidden = false;
+    $('panelBackdrop').hidden = false;
+  }
+
+  function closePanel() {
+    panelOpen = false;
+    $('uploadPanel').hidden = true;
+    $('panelBackdrop').hidden = true;
+  }
+
+  function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
+
+  function updateUploadFab() {
+    const uploading = queue.filter((it) => !it.done && !it.failed);
+    const failed = queue.filter((it) => !it.done && it.failed);
+    const hasContent = !!(uploading.length || failed.length || sessionResults.length || history.length);
+    $('uploadFab').hidden = view !== 'admin' || !hasContent;
+    $('uploadFab').classList.toggle('idle', !uploading.length && !failed.length);
+    const badge = $('fabBadge');
+    if (uploading.length) {
+      const avg = Math.round(uploading.reduce((s, it) => s + (it.pct || 0), 0) / uploading.length);
+      badge.className = 'fab-badge';
+      badge.textContent = avg + '%';
+      $('panelBadge').textContent = `上传中 ${uploading.length} 个`;
+    } else if (failed.length) {
+      badge.className = 'fab-badge';
+      badge.textContent = '失败 ' + failed.length;
+      $('panelBadge').textContent = `失败 ${failed.length} 个（点列表中的失败项可重试）`;
+    } else if (sessionResults.length) {
+      badge.className = 'fab-badge ok';
+      badge.textContent = '完成 ' + sessionResults.length;
+      $('panelBadge').textContent = `本次已完成 ${sessionResults.length} 个`;
+    } else {
+      badge.className = 'fab-badge idle';
+      badge.textContent = '';
+      $('panelBadge').textContent = '';
+    }
+    // 没有可展示的内容时收起面板（不调用 closePanel，避免递归）
+    if (!hasContent && panelOpen) {
+      panelOpen = false;
+      $('uploadPanel').hidden = true;
+      $('panelBackdrop').hidden = true;
+    }
   }
 
   // ---------- 相册 ----------
@@ -768,6 +957,21 @@ h1 { margin: 0; font-size: 20px; }
   let galleryPrefix = cfg.prefix + '/'; // 当前目录（尾部带 /）
   let selectMode = false;
   const selectedKeys = new Set();
+
+  // 公开画廊：publicPrefix 是相对 cfg.prefix 的路径（'' 或 'xxx/'）
+  let publicPrefix = '';
+  let publicMarker = '';
+  let publicLoaded = 0;
+  const publicKeys = new Set(); // 已公开图片的相对键（相对 cfg.prefix）
+
+  function pubRelOf(key) {
+    const root = cfg.prefix + '/';
+    return key.startsWith(root) ? key.slice(root.length) : key;
+  }
+  // 公开标记键：img/_picbed/public/<相对键>（零字节对象）
+  function pubMarkerOf(key) {
+    return cfg.prefix + '/_picbed/public/' + pubRelOf(key);
+  }
 
   function getBucketP(params) {
     return new Promise((resolve, reject) => {
@@ -931,23 +1135,263 @@ h1 { margin: 0; font-size: 20px; }
       .join('/');
   }
 
+  // 保留命名空间：img/_picbed/ 存公开标记，禁止作为相册名/上传目录使用
+  const RESERVED_SEGMENT = '_picbed';
+
+  function hasReservedSegment(path) {
+    return String(path || '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .some((s) => sanitizeSegment(s).toLowerCase() === RESERVED_SEGMENT);
+  }
+
   // 逐级创建相册标记，保证多级路径下每一层都是真实存在的相册
   async function ensureAlbumPath(prefix) {
     const root = cfg.prefix + '/';
     if (!prefix || !prefix.startsWith(root)) return;
     const rel = prefix.slice(root.length).replace(/\/+$/, '');
-    if (!rel) return;
+    if (!rel || hasReservedSegment(rel)) return;
     let acc = root;
     for (const seg of rel.split('/')) {
       acc += seg + '/';
       await putP(acc, '');
     }
+    invalidateAlbumTree();
   }
 
-  // 解析「移动 / 新建」输入的目标目录（相对当前目录，留空表示根目录）
+  // 解析「新建 / 移动 / 重命名」输入的目标目录：
+  //   留空 = 图床根目录；以 / 开头 = 相对图床根目录；否则相对当前目录
+  //   命中保留命名空间时返回 null
   function parseTargetPrefix(raw) {
-    const path = sanitizePath(raw);
-    return path ? galleryPrefix + path + '/' : cfg.prefix + '/';
+    const text = String(raw == null ? '' : raw).trim();
+    const abs = text.startsWith('/');
+    const path = sanitizePath(text.replace(/^\/+/, ''));
+    if (hasReservedSegment(path)) return null;
+    if (!path) return cfg.prefix + '/';
+    return abs ? cfg.prefix + '/' + path + '/' : galleryPrefix + path + '/';
+  }
+
+  // ---------- 自定义弹窗 ----------
+  // 统一的文本输入弹窗：确定返回输入值（未输入返回空串），取消返回 null
+  function promptDialog(opts) {
+    const o = opts || {};
+    return new Promise((resolve) => {
+      const dlg = $('promptDialog');
+      const input = $('promptInput');
+      $('promptTitle').textContent = o.title || '输入';
+      $('promptLabel').textContent = o.label || '内容';
+      $('promptHelp').textContent = o.help || '';
+      $('promptOk').textContent = o.confirmText || '确定';
+      input.value = o.value || '';
+      input.placeholder = o.placeholder || '';
+      $('promptTreeWrap').hidden = !o.tree;
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        dlg.hidden = true;
+        resolve(val);
+      };
+      if (o.tree) {
+        // 点击树节点：填入路径；若输入框里已有一个纯名称（如重命名时的相册名）则保留在末尾
+        const onPick = (p) => {
+          const cur = input.value.trim();
+          const keep = cur && !cur.includes('/') ? cur : '';
+          input.value = keep ? p + keep : p;
+          input.focus();
+        };
+        // 自动补全的查询词取「目录部分」，纯名称不参与过滤（否则重命名时树会被自己的名字过滤掉）
+        const treeQuery = () => {
+          const v = input.value.trim().replace(/^\/+/, '');
+          return v.endsWith('/') ? v : v.split('/').slice(0, -1).join('/');
+        };
+        const refresh = () => renderAlbumTree(treeQuery, onPick);
+        input.oninput = refresh;
+        refresh();
+      } else {
+        input.oninput = null;
+      }
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(input.value); }
+      };
+      $('promptOk').onclick = () => finish(input.value);
+      $('promptCancel').onclick = () => finish(null);
+      dlg.onclick = (e) => { if (e.target === dlg) finish(null); };
+      dlg.hidden = false;
+      input.focus();
+      input.select();
+    });
+  }
+
+  // 统一的确认弹窗：确定返回 true，取消返回 false
+  function confirmDialog(opts) {
+    const o = opts || {};
+    return new Promise((resolve) => {
+      const dlg = $('confirmDialog');
+      $('confirmTitle').textContent = o.title || '确认';
+      $('confirmMsg').textContent = o.message || '';
+      const ok = $('confirmOk');
+      ok.textContent = o.okText || '删除';
+      ok.className = o.danger === false ? 'btn primary' : 'btn danger-solid';
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        dlg.hidden = true;
+        resolve(val);
+      };
+      ok.onclick = () => finish(true);
+      $('confirmCancel').onclick = () => finish(false);
+      dlg.onclick = (e) => { if (e.target === dlg) finish(false); };
+      dlg.hidden = false;
+      ok.focus();
+    });
+  }
+
+  // ---------- 相册目录树（弹窗内补全用） ----------
+  let albumTreePaths = null;   // 扁平的相册路径数组（相对 cfg.prefix）
+  let albumTreeLoading = null;
+
+  function invalidateAlbumTree() { albumTreePaths = null; }
+
+  // 从 /list 全量结果推导相册路径：标记对象（尾 /）直接成路径，
+  // 普通对象则补上其所有祖先目录（覆盖文件夹上传产生的隐式目录）
+  function buildAlbumPaths(items) {
+    const root = cfg.prefix + '/';
+    const set = new Set();
+    for (const it of items) {
+      const key = (it && it.key) || '';
+      if (!key.startsWith(root)) continue;
+      const rel = key.slice(root.length);
+      if (!rel || hasReservedSegment(rel)) continue; // 保留命名空间不进目录树
+      if (rel.endsWith('/')) { set.add(rel); continue; }
+      const dirs = rel.split('/').slice(0, -1);
+      let acc = '';
+      for (const d of dirs) { acc += d + '/'; set.add(acc); }
+    }
+    return [...set].sort();
+  }
+
+  async function ensureAlbumTree() {
+    if (albumTreePaths) return albumTreePaths;
+    if (albumTreeLoading) return albumTreeLoading;
+    albumTreeLoading = (async () => {
+      const items = [];
+      let marker = '';
+      for (;;) {
+        const res = await fetch(`${cfg.worker}/list${marker ? '?marker=' + encodeURIComponent(marker) : ''}`, { headers: listHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '加载相册列表失败');
+        items.push(...(data.items || []));
+        if (data.truncated && data.nextMarker) marker = data.nextMarker;
+        else break;
+      }
+      albumTreePaths = buildAlbumPaths(items);
+      return albumTreePaths;
+    })();
+    try {
+      return await albumTreeLoading;
+    } finally {
+      albumTreeLoading = null;
+    }
+  }
+
+  // 扁平路径 → 嵌套树
+  function albumTreeFromPaths(paths) {
+    const root = { name: '', rel: '', children: new Map() };
+    for (const p of paths) {
+      let node = root;
+      let acc = '';
+      for (const seg of p.replace(/\/+$/, '').split('/')) {
+        if (!seg) continue;
+        acc += seg + '/';
+        if (!node.children.has(seg)) node.children.set(seg, { name: seg, rel: acc, children: new Map() });
+        node = node.children.get(seg);
+      }
+    }
+    return root;
+  }
+
+  // 递归渲染一级节点；子层懒展开
+  function appendTreeLevel(node, container, onPick) {
+    const kids = [...node.children.values()];
+    if (!kids.length) return;
+    const ul = document.createElement('ul');
+    for (const k of kids) {
+      const li = document.createElement('li');
+      const row = document.createElement('div');
+      row.className = 'tree-row';
+      const sub = document.createElement('div');
+      sub.hidden = true;
+      const caret = document.createElement('button');
+      caret.type = 'button';
+      caret.className = 'tree-caret' + (k.children.size ? '' : ' leaf');
+      caret.textContent = '▶';
+      if (k.children.size) {
+        caret.onclick = (e) => {
+          e.stopPropagation();
+          if (sub.hidden && !sub.dataset.built) {
+            sub.dataset.built = '1';
+            appendTreeLevel(k, sub, onPick);
+          }
+          sub.hidden = !sub.hidden;
+          caret.classList.toggle('open', !sub.hidden);
+        };
+      }
+      const label = document.createElement('button');
+      label.type = 'button';
+      label.className = 'tree-label';
+      label.textContent = k.name;
+      label.title = '/' + k.rel;
+      label.onclick = () => onPick('/' + k.rel);
+      row.append(caret, label);
+      li.append(row, sub);
+      ul.appendChild(li);
+    }
+    container.appendChild(ul);
+  }
+
+  // 渲染目录树：输入框有内容时改为匹配结果列表（自动补全），否则展示完整树
+  let treeRenderSeq = 0;
+  async function renderAlbumTree(getQuery, onPick) {
+    const seq = ++treeRenderSeq;
+    const box = $('promptTree');
+    const empty = (msg) => {
+      box.textContent = '';
+      const div = document.createElement('div');
+      div.className = 'tree-empty';
+      div.textContent = msg;
+      box.appendChild(div);
+    };
+    let paths;
+    try {
+      paths = await ensureAlbumTree();
+    } catch (e) {
+      empty('无法加载相册列表，可手动输入路径');
+      return;
+    }
+    if (seq !== treeRenderSeq) return; // 已有更新的渲染，丢弃本次
+    if (!paths.length) { empty('还没有相册，直接输入路径即可创建'); return; }
+    const query = String(getQuery ? getQuery() : '').trim().replace(/^\/+/, '').toLowerCase();
+    box.textContent = '';
+    if (query) {
+      const hits = paths.filter((p) => p.toLowerCase().includes(query));
+      if (!hits.length) { empty('没有匹配的相册'); return; }
+      const ul = document.createElement('ul');
+      for (const p of hits.slice(0, 50)) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'tree-label';
+        b.textContent = p;
+        b.onclick = () => onPick('/' + p);
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      return;
+    }
+    appendTreeLevel(albumTreeFromPaths(paths), box, onPick);
   }
 
   async function loadGallery(reset) {
@@ -970,7 +1414,11 @@ h1 { margin: 0; font-size: 20px; }
       });
       renderBreadcrumb();
       if (reset) {
-        for (const f of data.CommonPrefixes || []) $('galleryGrid').appendChild(renderFolderTile(f.Prefix));
+        const reserved = cfg.prefix + '/_picbed/';
+        for (const f of data.CommonPrefixes || []) {
+          if (f.Prefix === reserved) continue; // 公开标记的保留命名空间，管理视图不展示
+          $('galleryGrid').appendChild(renderFolderTile(f.Prefix));
+        }
       }
       const items = (data.Contents || [])
         .filter((c) => !c.Key.endsWith('/') && c.Key !== galleryPrefix)
@@ -987,6 +1435,183 @@ h1 { margin: 0; font-size: 20px; }
       btn.disabled = false;
       btn.textContent = '加载更多';
     }
+  }
+
+  // ---------- 公开画廊（游客视图） ----------
+  function publicGridHint(msg) {
+    $('galleryGrid').textContent = '';
+    const div = document.createElement('div');
+    div.className = 'gallery-empty';
+    div.textContent = msg;
+    $('galleryGrid').appendChild(div);
+  }
+
+  async function loadPublicGallery(reset) {
+    if (reset) {
+      publicMarker = '';
+      publicLoaded = 0;
+      $('galleryGrid').textContent = '';
+    }
+    if (!cfg.worker) {
+      renderBreadcrumb();
+      publicGridHint('还没有配置图片服务地址，无法加载公开画廊。');
+      return;
+    }
+    const btn = $('loadMore');
+    btn.disabled = true;
+    btn.textContent = '加载中…';
+    try {
+      const q = new URLSearchParams();
+      if (publicPrefix) q.set('prefix', publicPrefix);
+      if (publicMarker) q.set('marker', publicMarker);
+      const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      renderBreadcrumb();
+      if (reset) {
+        for (const folder of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(folder));
+      }
+      const files = (data.files || []).slice().reverse();
+      for (const f of files) {
+        $('galleryGrid').appendChild(renderGridItem({ key: cfg.prefix + '/' + f.key }, 'public'));
+      }
+      publicLoaded += files.length;
+      $('galleryCount').textContent = `已显示 ${publicLoaded} 张公开图片`;
+      publicMarker = data.truncated && data.nextMarker ? data.nextMarker : '';
+      btn.hidden = !publicMarker;
+      if (reset && !publicMarker && !publicLoaded && !(data.folders || []).length) {
+        publicGridHint(publicPrefix ? '这个相册里还没有公开的图片。' : '还没有公开的图片。管理员可在「我的相册」里点图片右上角的 🌑 设为公开。');
+      }
+    } catch (e) {
+      console.error('[picbed] 公开画廊加载失败:', e.message || e);
+      if (reset) publicGridHint('公开画廊加载失败：' + (e.message || '无法连接服务') + '（若刚更新过页面，请确认 Worker 已重新部署）');
+      toast('公开画廊加载失败：' + (e.message || e), true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '加载更多';
+    }
+  }
+
+  function renderPublicFolderTile(relPrefix) {
+    const name = relPrefix.replace(/\/+$/, '').split('/').pop() || relPrefix;
+    const fig = document.createElement('figure');
+    fig.className = 'folder-tile';
+    const icon = document.createElement('div');
+    icon.className = 'folder-icon';
+    icon.textContent = '📁';
+    const cap = document.createElement('figcaption');
+    cap.textContent = name;
+    fig.append(icon, cap);
+    fig.onclick = () => { publicPrefix = relPrefix; loadPublicGallery(true); };
+    return fig;
+  }
+
+  // ---------- 公开状态（管理视图） ----------
+  // 拉取全部公开标记，填充 publicKeys（以 /public 接口为准，无需密码）
+  async function loadPublicMarkers() {
+    if (!cfg.worker) return;
+    const next = new Set();
+    let marker = '';
+    for (;;) {
+      const q = new URLSearchParams();
+      if (marker) q.set('marker', marker);
+      const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      for (const f of data.files || []) next.add(f.key);
+      if (data.truncated && data.nextMarker) marker = data.nextMarker;
+      else break;
+    }
+    publicKeys.clear();
+    next.forEach((k) => publicKeys.add(k));
+    refreshPublicIndicators();
+    updateBulkBar();
+  }
+
+  function refreshPublicIndicators() {
+    document.querySelectorAll('#galleryGrid figure[data-key]').forEach((fig) => {
+      const btn = fig.querySelector('.pub-toggle');
+      if (!btn) return;
+      const on = publicKeys.has(pubRelOf(fig.dataset.key));
+      btn.textContent = on ? '🌍' : '🌑';
+      btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
+      btn.classList.toggle('on', on);
+    });
+    if (lightboxItem && !$('togglePublicBtn').hidden) updateLightboxPublicBtn();
+  }
+
+  async function togglePublic(key) {
+    const rel = pubRelOf(key);
+    const btn = document.querySelector(`#galleryGrid figure[data-key="${CSS.escape(key)}"] .pub-toggle`);
+    if (btn) btn.disabled = true;
+    try {
+      if (publicKeys.has(rel)) {
+        await deleteKeysP([pubMarkerOf(key)]);
+        publicKeys.delete(rel);
+        toast('已取消公开');
+      } else {
+        await putP(pubMarkerOf(key), '');
+        publicKeys.add(rel);
+        toast('已设为公开，游客可在公开画廊看到');
+      }
+      refreshPublicIndicators();
+    } catch (e) {
+      toast('操作失败：' + errMsg(e), true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function bulkTogglePublic() {
+    const keys = [...selectedKeys];
+    if (!keys.length) return;
+    const allPublic = keys.every((k) => publicKeys.has(pubRelOf(k)));
+    const btn = $('bulkPublicBtn');
+    btn.disabled = true;
+    try {
+      if (allPublic) {
+        await deleteKeysP(keys.map(pubMarkerOf));
+        keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
+        toast(`已取消公开 ${keys.length} 张`);
+      } else {
+        const todo = keys.filter((k) => !publicKeys.has(pubRelOf(k)));
+        for (const k of todo) {
+          await putP(pubMarkerOf(k), '');
+          publicKeys.add(pubRelOf(k));
+        }
+        toast(`已公开 ${todo.length} 张`);
+      }
+      refreshPublicIndicators();
+      updateBulkBar();
+    } catch (e) {
+      toast('操作失败：' + errMsg(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ---------- 视图切换 ----------
+  function switchView(next) {
+    view = next;
+    document.body.classList.toggle('view-public', view === 'public');
+    $('tabPublic').classList.toggle('active', view === 'public');
+    $('tabAdmin').classList.toggle('active', view === 'admin');
+    // 切视图时重置与视图相关的临时状态
+    selectMode = false;
+    $('selectModeBtn').classList.remove('active');
+    clearSelection();
+    closePanel();
+    closeLightbox();
+    $('galleryCount').textContent = '';
+    $('galleryGrid').textContent = '';
+    $('loadMore').hidden = true;
+    if (view === 'public') {
+      loadPublicGallery(true);
+    } else {
+      loadGallery(true);
+      loadPublicMarkers().catch((e) => toast('公开状态加载失败：' + (e.message || e), true));
+    }
+    updateUploadFab();
   }
 
   // ---------- 拖拽移动（图片 / 相册） ----------
@@ -1048,7 +1673,16 @@ h1 { margin: 0; font-size: 20px; }
         await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
         if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
       }
-      await deleteKeysP(keys);
+      // 公开标记跟随图片移动（保持公开状态），旧标记随原图一起删除
+      const movedPublic = pairs.filter((p) => publicKeys.has(pubRelOf(p.key)));
+      const oldMarkers = movedPublic.map((p) => pubMarkerOf(p.key));
+      for (const p of movedPublic) {
+        const newKey = map[p.targetKey] || p.targetKey;
+        await putP(pubMarkerOf(newKey), '');
+        publicKeys.delete(pubRelOf(p.key));
+        publicKeys.add(pubRelOf(newKey));
+      }
+      await deleteKeysP(keys.concat(oldMarkers));
       toast('移动完成');
       clearSelection();
       loadGallery(true);
@@ -1060,13 +1694,24 @@ h1 { margin: 0; font-size: 20px; }
   function renderBreadcrumb() {
     const el = $('galleryPath');
     el.textContent = '';
+    const isPublic = view === 'public';
     const rootPrefix = cfg.prefix + '/';
+    const relCurrent = isPublic ? publicPrefix : galleryPrefix.slice(rootPrefix.length);
+    const go = (prefix) => {
+      if (isPublic) {
+        publicPrefix = prefix.slice(rootPrefix.length);
+        loadPublicGallery(true);
+      } else {
+        galleryPrefix = prefix;
+        loadGallery(true);
+      }
+    };
     const crumb = (label, prefix, isCurrent) => {
       const b = document.createElement('button');
       b.className = 'crumb' + (isCurrent ? ' current' : '');
       b.textContent = label;
-      if (!isCurrent) b.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
-      makeDropTarget(b, () => prefix); // 可把图片/相册拖到上级目录
+      if (!isCurrent) b.onclick = () => go(prefix);
+      if (!isPublic) makeDropTarget(b, () => prefix); // 可把图片/相册拖到上级目录
       el.appendChild(b);
     };
     const sep = () => {
@@ -1075,10 +1720,10 @@ h1 { margin: 0; font-size: 20px; }
       s.textContent = '/';
       el.appendChild(s);
     };
-    crumb('🏠 全部', rootPrefix, galleryPrefix === rootPrefix);
-    if (galleryPrefix !== rootPrefix) {
+    crumb(isPublic ? '🏠 公开画廊' : '🏠 全部', rootPrefix, relCurrent === '');
+    if (relCurrent) {
       let acc = rootPrefix;
-      const parts = galleryPrefix.slice(rootPrefix.length).replace(/\/$/, '').split('/');
+      const parts = relCurrent.replace(/\/$/, '').split('/');
       parts.forEach((p, i) => {
         sep();
         acc += p + '/';
@@ -1103,9 +1748,16 @@ h1 { margin: 0; font-size: 20px; }
     rename.title = '重命名相册（可用 / 创建多级）';
     rename.onclick = async (e) => {
       e.stopPropagation();
-      const newPath = sanitizePath(prompt('新的相册名称（可用 / 创建多级）：', name));
-      if (!newPath) return;
-      const newPrefix = galleryPrefix + newPath + '/';
+      const raw = await promptDialog({
+        title: '重命名 / 移动相册',
+        label: '新的位置（含相册名）',
+        value: name,
+        help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
+        tree: true,
+      });
+      if (raw === null || !String(raw).trim()) return;
+      const newPrefix = parseTargetPrefix(raw);
+      if (!newPrefix) return toast('_picbed 是保留目录名，不能使用', true);
       if (newPrefix === prefix) return;
       if (newPrefix.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
       try {
@@ -1118,11 +1770,16 @@ h1 { margin: 0; font-size: 20px; }
     move.title = '移动相册到其他位置';
     move.onclick = async (e) => {
       e.stopPropagation();
-      const raw = prompt(
-        `把相册「${name}」移动到哪个相册？\n（相对当前目录，可用 / 指定多级；留空=移到根目录；取消=不移动）`
-      );
+      const raw = await promptDialog({
+        title: `移动相册「${name}」`,
+        label: '移动到哪个相册',
+        placeholder: '留空 = 移到根目录',
+        help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
+        tree: true,
+      });
       if (raw === null) return;
       const targetParent = parseTargetPrefix(raw);
+      if (!targetParent) return toast('_picbed 是保留目录名，不能使用', true);
       if (targetParent === galleryPrefix) return toast('目标就是当前位置', true);
       if (targetParent.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
       try {
@@ -1144,8 +1801,26 @@ h1 { margin: 0; font-size: 20px; }
         // 子相册（含空相册）也有零字节标记对象，必须一并删除，否则父相册删不掉
         const subAlbums = keys.filter((k) => k.endsWith('/') && k !== prefix).length;
         const extra = subAlbums ? ` 和 ${subAlbums} 个子相册` : '';
-        if (!confirm(`确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`)) return;
-        await deleteKeysP(keys); // 文件 + 本相册标记 + 全部子相册标记
+        const ok = await confirmDialog({
+          title: '删除相册',
+          message: `确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`,
+          okText: '删除相册',
+        });
+        if (!ok) return;
+        // 公开标记也要一并清掉，否则会残留指向已删图片的孤儿标记
+        const pubRoot = cfg.prefix + '/_picbed/public/';
+        const rel = prefix.slice((cfg.prefix + '/').length);
+        let pubMarkers = [];
+        if (rel) {
+          try {
+            pubMarkers = await listAllKeys(pubRoot + rel);
+          } catch (e) {
+            pubMarkers = [];
+          }
+        }
+        await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 本相册标记 + 全部子相册标记 + 公开标记
+        pubMarkers.forEach((m) => publicKeys.delete(m.slice(pubRoot.length)));
+        invalidateAlbumTree();
         toast('相册已删除');
         loadGallery(true);
       } catch (err) {
@@ -1176,6 +1851,7 @@ h1 { margin: 0; font-size: 20px; }
 
   async function moveFolder(oldPrefix, newPrefix) {
     if (!newPrefix || newPrefix === oldPrefix) return;
+    invalidateAlbumTree(); // 目录结构即将变化
     const keys = await listAllKeys(oldPrefix);
     if (!keys.length) return toast('相册为空');
     const files = keys.filter((k) => !k.endsWith('/'));
@@ -1184,7 +1860,19 @@ h1 { margin: 0; font-size: 20px; }
     const pairs = files.map((k) => ({ key: k, targetKey: newPrefix + k.slice(oldPrefix.length) }));
     const { action, map } = await resolveCollisions(pairs);
     if (action === 'cancel') return toast('已取消');
-    const total = pairs.length + markers.length;
+    // 相册内已公开的图片：标记要跟着一起搬
+    const root = cfg.prefix + '/';
+    const pubRoot = cfg.prefix + '/_picbed/public/';
+    const oldRel = oldPrefix.slice(root.length); // 旧相册相对路径（尾部带 /）
+    let pubMarkers = [];
+    if (oldRel) {
+      try {
+        pubMarkers = await listAllKeys(pubRoot + oldRel);
+      } catch (e) {
+        pubMarkers = [];
+      }
+    }
+    const total = pairs.length + markers.length + pubMarkers.length;
     let done = 0;
     try {
       for (const p of pairs) {
@@ -1197,7 +1885,17 @@ h1 { margin: 0; font-size: 20px; }
         done++;
         if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
       }
-      await deleteKeysP(keys); // 文件 + 旧相册标记 + 子相册旧标记
+      for (const m of pubMarkers) {
+        const inside = m.slice((pubRoot + oldRel).length); // 相册内的相对键
+        const oldReal = cfg.prefix + '/' + oldRel + inside;
+        const newReal = map[oldReal] || newPrefix + inside;
+        await putP(pubMarkerOf(newReal), '');
+        publicKeys.delete(pubRelOf(oldReal));
+        publicKeys.add(pubRelOf(newReal));
+        done++;
+        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
+      }
+      await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 旧相册标记 + 子相册旧标记 + 旧公开标记
       await ensureAlbumPath(newPrefix); // 多级路径逐层建好，并补上新相册标记
       toast('移动完成');
       loadGallery(true);
@@ -1209,10 +1907,19 @@ h1 { margin: 0; font-size: 20px; }
 
   async function newAlbum() {
     if (!needWorker()) return;
-    const path = sanitizePath(prompt('新相册名称（可用 / 创建多级，如 旅行/2024/西藏）：'));
-    if (!path) return;
+    const raw = await promptDialog({
+      title: '新建相册',
+      label: '相册路径',
+      placeholder: '如 旅行/2024/西藏',
+      help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
+      confirmText: '创建',
+      tree: true,
+    });
+    if (raw === null || !String(raw).trim()) return;
+    const target = parseTargetPrefix(raw);
+    if (!target) return toast('_picbed 是保留目录名，不能使用', true);
     try {
-      await ensureAlbumPath(galleryPrefix + path + '/');
+      await ensureAlbumPath(target);
       toast('相册已创建');
       loadGallery(true);
     } catch (err) {
@@ -1244,22 +1951,42 @@ h1 { margin: 0; font-size: 20px; }
     const n = selectedKeys.size;
     $('bulkCount').textContent = `已选 ${n} 张`;
     bar.hidden = !n;
+    if (n) {
+      const allPublic = [...selectedKeys].every((k) => publicKeys.has(pubRelOf(k)));
+      $('bulkPublicBtn').textContent = allPublic ? '🌑 取消公开' : '🌍 设为公开';
+    }
   }
 
   async function bulkMove() {
     const keys = [...selectedKeys];
     if (!keys.length) return;
-    const raw = prompt('移动到哪个相册？（相对当前目录，可用 / 指定多级；留空=根目录；取消=不移动）');
+    const raw = await promptDialog({
+      title: `移动 ${keys.length} 张图片`,
+      label: '移动到哪个相册',
+      placeholder: '留空 = 移到根目录',
+      help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
+      confirmText: '移动',
+      tree: true,
+    });
     if (raw === null) return;
-    await moveImagesTo(keys, parseTargetPrefix(raw));
+    const target = parseTargetPrefix(raw);
+    if (!target) return toast('_picbed 是保留目录名，不能使用', true);
+    await moveImagesTo(keys, target);
   }
 
   async function bulkDelete() {
     const keys = [...selectedKeys];
     if (!keys.length) return;
-    if (!confirm(`确定删除选中的 ${keys.length} 张图片？此操作不可恢复。`)) return;
+    const ok = await confirmDialog({
+      title: '批量删除',
+      message: `确定删除选中的 ${keys.length} 张图片？此操作不可恢复。`,
+      okText: '删除',
+    });
+    if (!ok) return;
     try {
-      await deleteKeysP(keys);
+      const markers = keys.filter((k) => publicKeys.has(pubRelOf(k))).map(pubMarkerOf);
+      await deleteKeysP(keys.concat(markers));
+      keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
       toast('已删除');
       clearSelection();
       loadGallery(true);
@@ -1268,12 +1995,17 @@ h1 { margin: 0; font-size: 20px; }
     }
   }
 
-  function renderGridItem(it) {
+  function renderGridItem(it, mode) {
+    const isPublic = mode === 'public';
     const fig = document.createElement('figure');
-    if (selectMode) fig.classList.add('selectable');
-    const check = document.createElement('span');
-    check.className = 'sel-check';
-    check.hidden = !selectMode;
+    fig.dataset.key = it.key;
+    if (!isPublic) {
+      if (selectMode) fig.classList.add('selectable');
+      const check = document.createElement('span');
+      check.className = 'sel-check';
+      check.hidden = !selectMode;
+      fig.appendChild(check);
+    }
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -1284,7 +2016,17 @@ h1 { margin: 0; font-size: 20px; }
     };
     const cap = document.createElement('figcaption');
     cap.textContent = it.key.split('/').pop();
-    fig.append(check, img, cap);
+    fig.append(img, cap);
+    if (isPublic) {
+      // 游客视图：只读，点击看大图
+      fig.onclick = () => openLightbox(it);
+      return fig;
+    }
+    // 公开状态切换
+    const pub = document.createElement('button');
+    pub.className = 'pub-toggle';
+    pub.onclick = (e) => { e.stopPropagation(); togglePublic(it.key); };
+    fig.appendChild(pub);
     // 拖拽移动：多选模式下拖动已选中的图片会移动整批
     fig.draggable = true;
     fig.addEventListener('dragstart', (e) => {
@@ -1321,6 +2063,14 @@ h1 { margin: 0; font-size: 20px; }
   // ---------- 灯箱 ----------
   let lightboxItem = null;
 
+  function updateLightboxPublicBtn() {
+    if (!lightboxItem) return;
+    const on = publicKeys.has(pubRelOf(lightboxItem.key));
+    const btn = $('togglePublicBtn');
+    btn.textContent = on ? '🌑 取消公开' : '🌍 设为公开';
+    btn.classList.toggle('on', on);
+  }
+
   function openLightbox(item) {
     lightboxItem = item;
     const url = publicUrl(item.key);
@@ -1329,6 +2079,11 @@ h1 { margin: 0; font-size: 20px; }
     document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
       b.onclick = () => copyText(makeLinks(url, item.key.split('/').pop())[b.dataset.fmt]);
     });
+    // 游客视图只读：隐藏删除与公开切换
+    const isAdmin = view === 'admin';
+    $('deleteBtn').hidden = !isAdmin;
+    $('togglePublicBtn').hidden = !isAdmin;
+    if (isAdmin) updateLightboxPublicBtn();
     $('lightbox').hidden = false;
   }
 
@@ -1381,9 +2136,12 @@ h1 { margin: 0; font-size: 20px; }
     cfg.customDomain = $('setDomain').value.trim().replace(/\/+$/, '');
     cfg.format = $('setFormat').value;
     tokenCache = null;
+    invalidateAlbumTree();
     saveSettings();
     toast('设置已保存');
     closeSettings();
+    // 密码与 Worker 都填好才能进管理视图，否则留在公开画廊
+    switchView(cfg.worker && cfg.password ? 'admin' : 'public');
   }
 
   // ---------- 事件绑定 ----------
@@ -1405,6 +2163,7 @@ h1 { margin: 0; font-size: 20px; }
   };
   let dragDepth = 0;
   window.addEventListener('dragenter', (e) => {
+    if (view !== 'admin') return; // 游客视图不接受上传
     if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files')) return;
     e.preventDefault();
     dragDepth++;
@@ -1423,11 +2182,13 @@ h1 { margin: 0; font-size: 20px; }
     e.preventDefault();
     dragDepth = 0;
     $('dropOverlay').hidden = true;
+    if (view !== 'admin') return;
     const files = await collectFromDataTransfer(e.dataTransfer);
     if (files.length) addFiles(files);
   });
 
   document.addEventListener('paste', (e) => {
+    if (view !== 'admin') return;
     if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
     const files = [];
     for (const it of (e.clipboardData || {}).items || []) {
@@ -1461,32 +2222,76 @@ h1 { margin: 0; font-size: 20px; }
   $('closeSettings').onclick = closeSettings;
   $('settingsDialog').addEventListener('click', (e) => { if (e.target === $('settingsDialog')) closeSettings(); });
   $('refreshGallery').onclick = () => loadGallery(true);
-  $('loadMore').onclick = () => loadGallery(false);
+  $('loadMore').onclick = () => (view === 'public' ? loadPublicGallery(false) : loadGallery(false));
   $('newAlbumBtn').onclick = newAlbum;
   $('selectModeBtn').onclick = toggleSelectMode;
   $('bulkMoveBtn').onclick = bulkMove;
+  $('bulkPublicBtn').onclick = bulkTogglePublic;
   $('bulkDeleteBtn').onclick = bulkDelete;
   $('bulkCancelBtn').onclick = clearSelection;
+  // 视图切换
+  $('tabPublic').onclick = () => { if (view !== 'public') switchView('public'); };
+  $('tabAdmin').onclick = () => {
+    if (view === 'admin') return;
+    if (!cfg.worker || !cfg.password) {
+      openSettings();
+      toast('请填写 Worker 地址与上传密码后再进入管理视图', true);
+      return;
+    }
+    switchView('admin');
+  };
   $('thumbMode').checked = cfg.thumb;
   $('thumbMode').onchange = () => { cfg.thumb = $('thumbMode').checked; saveSettings(); loadGallery(true); };
   $('clearHistory').onclick = () => { history = []; persistHistory(); renderHistory(); };
-  $('deleteBtn').onclick = () => {
-    if (!lightboxItem || !confirm('确定删除这张图片？此操作不可恢复。')) return;
-    cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: lightboxItem.key }, (err) => {
+  $('deleteBtn').onclick = async () => {
+    if (!lightboxItem) return;
+    const ok = await confirmDialog({
+      title: '删除图片',
+      message: '确定删除这张图片？此操作不可恢复。',
+      okText: '删除',
+    });
+    if (!ok) return;
+    const key = lightboxItem.key;
+    const rel = pubRelOf(key);
+    const wasPublic = publicKeys.has(rel);
+    cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err) => {
       if (err) return toast('删除失败：' + (err.message || err), true);
+      if (wasPublic) {
+        // 同时清掉公开标记，避免残留孤儿
+        publicKeys.delete(rel);
+        deleteKeysP([pubMarkerOf(key)]).catch(() => {});
+      }
       toast('已删除（走 CDN 的话缓存可能仍短暂可见）');
       closeLightbox();
       loadGallery(true);
     });
   };
+  $('togglePublicBtn').onclick = () => { if (lightboxItem) togglePublic(lightboxItem.key); };
   $('lightboxClose').onclick = closeLightbox;
   $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) closeLightbox(); });
+
+  // 上传状态悬浮按钮与面板
+  $('uploadFab').onclick = togglePanel;
+  $('panelClose').onclick = closePanel;
+  $('panelBackdrop').onclick = closePanel;
+
+  // Esc：只关闭最上面的一层（弹窗 > 灯箱 > 面板）
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('promptDialog').hidden) { $('promptCancel').click(); return; }
+    if (!$('confirmDialog').hidden) { $('confirmCancel').click(); return; }
+    if (!$('settingsDialog').hidden) { closeSettings(); return; }
+    if (!$('dupDialog').hidden) { $('dupSkip').click(); return; }
+    if (!$('lightbox').hidden) { closeLightbox(); return; }
+    if (!$('uploadPanel').hidden) { closePanel(); }
+  });
 
   // ---------- 初始化 ----------
   $('bucketInfo').textContent = `${cfg.bucket} · ${cfg.region}`;
   renderHistory();
+  updateUploadFab();
+  switchView(view); // 有密码直接进管理视图，否则先看公开画廊
   if (!cfg.worker) openSettings();
-  loadGallery(true);
 })();
 </script>
 </body>
