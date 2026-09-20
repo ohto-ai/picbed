@@ -12,6 +12,7 @@
  *   GET  /list       列出 PREFIX 下的对象（需密码，供前端构建相册目录树）
  *   GET  /public     列出公开图片（无需密码）：img/_picbed/public/ 下的零字节标记
  *                    镜像了「已设为公开」的图片相对键，前端据此渲染游客画廊
+ *                    ?flat=1 返回该前缀下全部标记（不按 / 折叠），管理端同步公开状态用
  */
 
 const MAX_BYTES = 10 * 1024 * 1024; // 转存单图上限 10MB
@@ -282,10 +283,15 @@ async function handlePublic(url, env) {
   const root = publicRoot(env);
   const marker = url.searchParams.get('marker') || '';
   const maxKeys = Math.min(Math.max(Number(url.searchParams.get('max-keys')) || 500, 1), 1000);
-  const data = await cosList(env, { prefix: root + rel, marker, delimiter: '/', maxKeys });
-  const folders = (data.commonPrefixes || [])
-    .filter((p) => p.startsWith(root) && p.length > root.length)
-    .map((p) => p.slice(root.length));
+  // flat=1：不折叠目录，一次返回该前缀下全部公开标记（管理端同步公开状态用）。
+  // 游客画廊需要 CommonPrefixes 渲染子相册，所以默认仍带 delimiter。
+  const flat = url.searchParams.get('flat') === '1';
+  const data = await cosList(env, { prefix: root + rel, marker, delimiter: flat ? '' : '/', maxKeys });
+  const folders = flat
+    ? []
+    : (data.commonPrefixes || [])
+        .filter((p) => p.startsWith(root) && p.length > root.length)
+        .map((p) => p.slice(root.length));
   const files = (data.items || [])
     .filter((it) => it.key.startsWith(root) && it.key !== root + rel && !it.key.endsWith('/'))
     .map((it) => ({ key: it.key.slice(root.length) }));

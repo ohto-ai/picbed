@@ -166,7 +166,8 @@ h1 { margin: 0; font-size: 20px; }
 /* 图片卡片上的公开切换按钮 */
 .grid figure .pub-toggle { position: absolute; top: 6px; right: 6px; z-index: 2; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); opacity: 0; transition: opacity .12s; }
 .grid figure:hover .pub-toggle { opacity: 1; }
-.grid figure .pub-toggle.on { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
+/* 公开状态由文件名前的 pub 徽标表达，按钮只在悬停时出现；.on 仅保留高亮样式 */
+.grid figure .pub-toggle.on { border-color: var(--accent); background: var(--accent-soft); }
 .grid figure .pub-toggle:disabled { opacity: .5; cursor: not-allowed; }
 .grid figure { position: relative; margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: zoom-in; transition: transform .12s, box-shadow .12s; }
 .grid figure:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
@@ -1528,12 +1529,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // ---------- 公开状态（管理视图） ----------
   // 拉取全部公开标记，填充 publicKeys（以 /public 接口为准，无需密码）
+  // 必须带 flat=1：否则子相册里的标记会被折叠进 folders，公开状态读不全
   async function loadPublicMarkers() {
     if (!cfg.worker) return;
     const next = new Set();
     let marker = '';
     for (;;) {
       const q = new URLSearchParams();
+      q.set('flat', '1');
       if (marker) q.set('marker', marker);
       const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
       const data = await res.json().catch(() => ({}));
