@@ -39,7 +39,10 @@ picbed/
 │  ├─ worker.js            # Cloudflare Worker：签 STS + 远程转存
 │  └─ wrangler.toml        # Worker 配置（桶信息）
 ├─ .github/workflows/
-│  └─ pages.yml            # 推送到 GitHub 后自动部署 Pages
+│  ├─ pages.yml            # 推送到 GitHub 后自动部署 Pages
+│  └─ renew-cert.yml       # 每周自动续期证书并部署到腾讯云 COS
+├─ scripts/
+│  └─ tencent-cert-deploy.py  # 上传证书到腾讯云 SSL 并绑定 COS 自定义域名
 └─ README.md
 ```
 
@@ -130,6 +133,58 @@ wrangler deploy
 | 存储路径 | `img/` |
 | 自定义域名 | `https://album.ohtoai.top` |
 
+### 六、证书自动续期（`album.ohtoai.top`）
+
+`album.ohtoai.top` 的 HTTPS 证书由 GitHub Actions 全自动维护：每周定时用 acme.sh 走 Cloudflare DNS-01 验证向 Let's Encrypt 续期 → 上传到腾讯云 SSL 证书管理 → 自动绑定到 COS 存储桶 `album-1255316209` 的自定义域名。证书到期前 30 天才会真正换新，其余时候流程仅做上传校验，相同证书不会重复上传。
+
+首次启用需一次性配置：
+
+1. **Cloudflare API Token**：Cloudflare 控制台 → 我的个人资料 → **API 令牌 → 创建令牌**，模板选「编辑区域 DNS」（Zone.DNS.Edit），区域限定为 `ohtoai.top`。记下 Token；Zone ID 在域名概览页右下角
+2. **腾讯云子账号密钥**：按「步骤一」的方式新建一个子账号，粘贴下方最小权限策略（仅能上传证书 + 给该桶绑定/查询证书）：
+
+   ```json
+   {
+     "version": "2.0",
+     "statement": [
+       {
+         "effect": "allow",
+         "action": ["name/ssl:UploadCertificate"],
+         "resource": ["*"]
+       },
+       {
+         "effect": "allow",
+         "action": [
+           "name/cos:PutBucketDomainCertificate",
+           "name/cos:GetBucketDomainCertificate"
+         ],
+         "resource": ["qcs::cos:ap-shanghai:uid/1255316209:album-1255316209/*"]
+       }
+     ]
+   }
+   ```
+
+   > 若策略编辑器里搜不到上面的 `cos:` action（接口较新），可暂时改用 `name/cos:*`。
+
+3. **配置 GitHub Secrets**：仓库 → Settings → Secrets and variables → Actions，新增 4 个 secret：
+
+   | Secret | 值 |
+   |---|---|
+   | `CF_API_TOKEN` | 第 1 步的 Cloudflare API Token |
+   | `CF_ZONE_ID` | `ohtoai.top` 的 Zone ID |
+   | `TENCENT_SECRET_ID` | 第 2 步子账号的 SecretId |
+   | `TENCENT_SECRET_KEY` | 第 2 步子账号的 SecretKey |
+
+   （可选）加一个变量 `ACME_EMAIL` 作为 Let's Encrypt 注册邮箱，默认 `noreply@ohtoai.top`。
+
+4. **测试**：Actions → `自动续期证书并部署到腾讯云 COS` → Run workflow，勾选「强制重新签发」跑一次。日志三步全绿后，到 [SSL 证书管理](https://console.cloud.tencent.com/ssl) 和 COS 桶「域名与传输管理」里确认新证书已就位。
+
+注意事项：
+
+- 每周一自动跑（北京时间周二凌晨）；失败时 GitHub 会发邮件到账号邮箱
+- 公开仓库的定时任务在 60 天无提交后会被 GitHub 停用，保持仓库有 push 即可（手动 Run workflow 不受影响）
+- acme.sh 的账号/证书状态（含 Cloudflare Token）存在 workflow artifact 里，仅本仓库有权限的 token 可读取，不会对外公开；轮换 Cloudflare Token 后手动「强制重新签发」跑一次即可
+- 每次换证都会在 SSL 证书管理里新增一条证书（约每 90 天一条），旧证书到期后可手动清理
+
 ## 使用说明
 
 - **上传**：拖拽 / 点击 / Ctrl+V 粘贴，支持批量
@@ -157,10 +212,11 @@ wrangler deploy
 | 图片链接打不开 | 确认桶是公有读；若走 CDN 检查回源配置 |
 | 删了图片还能访问 | CDN 缓存未过期，可在 CDN 控制台刷新目录 |
 | 相册里缩略图全挂了 | 未开通 COS 图片处理，关掉「缩略图」开关即可 |
+| 证书快过期了还没换 | 看 Actions 里 renew-cert 是否失败（失败会收到邮件），或手动 Run workflow 勾选「强制重新签发」 |
 
 ## 成本与安全
 
 - **成本**：GitHub Pages 与 Cloudflare Worker 免费；COS 收存储费（约 0.1 元/GB/月）+ 流量费（约 0.5 元/GB），个人用量每月几毛到几元，走 `album.ohtoai.top`（CDN）流量更便宜
-- **密钥安全**：`TENCENT_SECRET_ID / TENCENT_SECRET_KEY` 只存在于 Worker 的 Secrets 中，绝不写进任何会被公开的文件；网页拿到的只是 30 分钟有效、仅限 `img/` 目录的临时密钥
+- **密钥安全**：`TENCENT_SECRET_ID / TENCENT_SECRET_KEY` 只存在于 Worker 的 Secrets 和 GitHub Secrets（证书自动化）中，绝不写进任何会被公开的文件；网页拿到的只是 30 分钟有效、仅限 `img/` 目录的临时密钥
 - **防盗链**：桶是公有读，知道域名的人都能看图，介意的话在 CDN 上开防盗链
 - **注意**：Worker 的 `PREFIX` 与 `config.js` 的 `prefix` 必须一致（默认都是 `img`）

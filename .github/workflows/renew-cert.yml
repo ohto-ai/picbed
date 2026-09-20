@@ -1,0 +1,104 @@
+name: 自动续期证书并部署到腾讯云 COS
+
+on:
+  schedule:
+    # 每周一 19:07 UTC（北京时间周二 03:07）；acme.sh 只在到期前 30 天内真正换证
+    - cron: '7 19 * * 1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '强制重新签发证书（测试用，正常无需勾选）'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: renew-cert
+  cancel-in-progress: false
+
+env:
+  DOMAIN: album.ohtoai.top
+  BUCKET: album-1255316209
+  REGION: ap-shanghai
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 恢复 acme.sh 状态（账号密钥与已签发证书）
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.acme.sh"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts?name=acme-state&per_page=1"
+          url=$(curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" "$api" \
+            | python3 -c 'import json,sys; a=json.load(sys.stdin).get("artifacts") or []; print(a[0]["archive_download_url"] if a else "")')
+          if [ -n "$url" ]; then
+            curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$url" -o /tmp/acme-state.zip
+            unzip -q -o /tmp/acme-state.zip -d /tmp/acme-state
+            tar xzf /tmp/acme-state/state.tar.gz -C "$HOME"
+            echo "已恢复上次运行状态"
+          else
+            echo "首次运行，无历史状态，将新申请证书"
+          fi
+
+      - name: 签发或续期证书（acme.sh + Cloudflare DNS-01）
+        env:
+          CF_Token: ${{ secrets.CF_API_TOKEN }}
+          CF_Zone_ID: ${{ secrets.CF_ZONE_ID }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL || 'noreply@ohtoai.top' }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/acmesh-official/acme.sh /tmp/acme.sh-src
+          cd /tmp/acme.sh-src
+          ./acme.sh --register-account -m "$ACME_EMAIL" --server letsencrypt >/dev/null 2>&1 || true
+          FORCE_FLAG=""
+          [ "${{ github.event.inputs.force }}" = "true" ] && FORCE_FLAG="--force"
+          set +e
+          out=$(./acme.sh --issue -d "$DOMAIN" --dns dns_cf --server letsencrypt --keylength ec-256 $FORCE_FLAG 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          # 返回码：0 = 签发/续期成功；2 = 证书未到期（跳过换证）；1 = 出错
+          if [ "$rc" -eq 1 ]; then
+            echo "::error::acme.sh 签发/续期失败"
+            exit 1
+          fi
+          if [ "$rc" -eq 2 ]; then
+            echo "证书未到期，本次跳过换证（仍会重新上传校验）"
+          else
+            echo "证书已签发/续期"
+          fi
+
+      - name: 上传证书到腾讯云 SSL 并绑定 COS 自定义域名
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          python3 scripts/tencent-cert-deploy.py \
+            --domain "$DOMAIN" \
+            --bucket "$BUCKET" \
+            --region "$REGION" \
+            --cert "$HOME/.acme.sh/${DOMAIN}_ecc/fullchain.cer" \
+            --key "$HOME/.acme.sh/${DOMAIN}_ecc/${DOMAIN}.key"
+
+      - name: 保存 acme.sh 状态
+        if: always()
+        run: |
+          set -euo pipefail
+          tar czf /tmp/state.tar.gz -C "$HOME" .acme.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acme-state
+          path: /tmp/state.tar.gz
+          retention-days: 90
+          if-no-files-found: error
