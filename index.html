@@ -90,7 +90,7 @@ h1 { margin: 0; font-size: 20px; }
 .grid figure.drop-hover .folder-icon { transform: scale(1.08); }
 
 /* 全页拖放遮罩 */
-#dropOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; }
+#dropOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; pointer-events: none; }
 .drop-overlay-box { background: var(--panel); border: 3px dashed var(--accent); border-radius: var(--radius); padding: 48px 64px; text-align: center; }
 .dz-icon { font-size: 40px; }
 .drop-overlay-box p { margin: 8px 0 0; }
@@ -176,6 +176,19 @@ h1 { margin: 0; font-size: 20px; }
 .sel-check { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; border-radius: 50%; background: var(--panel); border: 2px solid var(--border); z-index: 2; }
 .grid figure.selected .sel-check { background: var(--accent); border-color: var(--accent); }
 .grid figure.selected .sel-check::after { content: '✓'; color: #fff; font-size: 11px; position: absolute; top: -1px; left: 2px; }
+.grid figure.selectable { cursor: pointer; }
+/* 文件名前的公开状态徽标 */
+.pub-badge { display: inline-block; font-size: 10px; font-weight: 600; line-height: 1.4; color: #fff; background: var(--ok); border-radius: 8px; padding: 0 5px; margin-right: 4px; vertical-align: 1px; }
+/* 多选模式下的拖动框选 */
+#marquee { position: fixed; z-index: 65; border: 1px solid var(--accent); background: var(--accent-soft); pointer-events: none; }
+body.marqueeing { user-select: none; -webkit-user-select: none; }
+body.marqueeing .grid figure { cursor: default; transform: none; }
+/* 右键菜单 */
+#ctxMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 5px; min-width: 176px; }
+#ctxMenu button { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--text); font-size: 13px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+#ctxMenu button:hover { background: var(--accent-soft); color: var(--accent); }
+#ctxMenu button.danger { color: var(--danger); }
+#ctxMenu .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
 .gallery-more { text-align: center; margin-top: 14px; }
 
 /* 设置弹窗 */
@@ -298,7 +311,7 @@ h1 { margin: 0; font-size: 20px; }
     <span class="gallery-spacer"></span>
     <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
   </div>
-  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
+  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
   <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
@@ -306,6 +319,8 @@ h1 { margin: 0; font-size: 20px; }
   </div>
 
   <div id="bulkBar" class="bulk-bar admin-only" hidden>
+    <button id="bulkSelectAllBtn" class="btn small">全选</button>
+    <button id="bulkInvertBtn" class="btn small">反选</button>
     <span id="bulkCount"></span>
     <button id="bulkMoveBtn" class="btn small">📦 移动到相册</button>
     <button id="bulkPublicBtn" class="btn small">🌍 设为公开</button>
@@ -457,6 +472,8 @@ h1 { margin: 0; font-size: 20px; }
 </div>
 
 <div id="toast"></div>
+<div id="ctxMenu" hidden></div>
+<div id="marquee" hidden></div>
 
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cos-js-sdk-v5@1/dist/cos-js-sdk-v5.min.js"></script>
@@ -551,12 +568,12 @@ h1 { margin: 0; font-size: 20px; }
     return String(seg || '').trim().replace(/[\\:*?"<>|]+/g, '_').replace(/^\.+$/, '');
   }
 
-  // relPath 支持子目录（文件夹上传时保留目录结构）
-  function makeKey(relPath, type) {
+  // relPath 支持子目录（文件夹上传时保留目录结构）；prefix 指定上传目标相册（默认当前目录）
+  function makeKey(relPath, type, prefix) {
     const parts = String(relPath || '').replace(/\\/g, '/').split('/').filter(Boolean).map(sanitizeSegment).filter(Boolean);
     let name = parts.pop() || '';
     if (!name || name === '_') name = 'image_' + Math.random().toString(36).slice(2, 8) + '.' + (TYPE_EXT_MAP[type] || 'bin');
-    return galleryPrefix + (parts.length ? parts.join('/') + '/' : '') + name;
+    return (prefix || galleryPrefix) + (parts.length ? parts.join('/') + '/' : '') + name;
   }
 
   function errMsg(e) {
@@ -611,7 +628,7 @@ h1 { margin: 0; font-size: 20px; }
   const queue = [];
   let processing = false;
 
-  function addFiles(files) {
+  function addFiles(files, targetPrefix) {
     if (!needWorker()) return;
     let added = 0;
     let skippedNonImage = 0;
@@ -626,7 +643,7 @@ h1 { margin: 0; font-size: 20px; }
         skippedReserved++;
         continue;
       }
-      enqueue(f);
+      enqueue(f, targetPrefix);
       added++;
     }
     if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
@@ -683,7 +700,7 @@ h1 { margin: 0; font-size: 20px; }
     return [...((dt && dt.files) || [])];
   }
 
-  function enqueue(file) {
+  function enqueue(file, uploadPrefix) {
     const row = document.createElement('div');
     row.className = 'q-item';
     const thumb = document.createElement('img');
@@ -711,14 +728,14 @@ h1 { margin: 0; font-size: 20px; }
       thumb.onload = () => URL.revokeObjectURL(u);
     }
     $('queue').appendChild(row);
-    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0 });
+    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0, prefix: uploadPrefix || null });
     updateUploadFab();
   }
 
   async function uploadFile(file, item, dupCtx) {
-    const { fill, status } = item;
+    const { fill, status, prefix } = item;
     const relPath = file.__relPath || file.name;
-    let key = makeKey(relPath, file.type);
+    let key = makeKey(relPath, file.type, prefix);
     if ((await headP(key)).state === 'exists') {
       let action = dupCtx.action;
       if (!action) {
@@ -958,6 +975,7 @@ h1 { margin: 0; font-size: 20px; }
   let galleryPrefix = cfg.prefix + '/'; // 当前目录（尾部带 /）
   let selectMode = false;
   const selectedKeys = new Set();
+  let anchorFig = null; // Shift 连选的锚点卡片
 
   // 公开画廊：publicPrefix 是相对 cfg.prefix 的路径（'' 或 'xxx/'）
   let publicPrefix = '';
@@ -1425,6 +1443,7 @@ h1 { margin: 0; font-size: 20px; }
         .filter((c) => !c.Key.endsWith('/') && c.Key !== galleryPrefix)
         .reverse();
       for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }));
+      refreshPublicIndicators(); // 公开状态可能先于/后于相册加载完成，渲染后再同步一次
       galleryLoaded += items.length;
       $('galleryCount').textContent = `已显示 ${galleryLoaded} 张`;
       galleryMarker = String(data.IsTruncated) === 'true' ? data.NextMarker : '';
@@ -1531,12 +1550,15 @@ h1 { margin: 0; font-size: 20px; }
 
   function refreshPublicIndicators() {
     document.querySelectorAll('#galleryGrid figure[data-key]').forEach((fig) => {
-      const btn = fig.querySelector('.pub-toggle');
-      if (!btn) return;
       const on = publicKeys.has(pubRelOf(fig.dataset.key));
-      btn.textContent = on ? '🌍' : '🌑';
-      btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
-      btn.classList.toggle('on', on);
+      const btn = fig.querySelector('.pub-toggle');
+      if (btn) {
+        btn.textContent = on ? '🌍' : '🌑';
+        btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
+        btn.classList.toggle('on', on);
+      }
+      const badge = fig.querySelector('.pub-badge');
+      if (badge) badge.hidden = !on; // 文件名前的 pub 徽标
     });
     if (lightboxItem && !$('togglePublicBtn').hidden) updateLightboxPublicBtn();
   }
@@ -1617,6 +1639,12 @@ h1 { margin: 0; font-size: 20px; }
 
   // ---------- 拖拽移动（图片 / 相册） ----------
   let dragPayload = null;
+  let uploadTargetPrefix = null; // 文件上传悬停的目标相册（null = 当前相册）
+  let uploadHoverTimer = null;
+
+  function hasFilePayload(dt) {
+    return !!(dt && dt.types && [...dt.types].includes('Files'));
+  }
 
   function canDropInto(targetPrefix) {
     if (!dragPayload) return false;
@@ -1627,21 +1655,60 @@ h1 { margin: 0; font-size: 20px; }
     return targetPrefix !== galleryPrefix; // 图片已在当前目录，拖回当前目录是空操作
   }
 
-  function makeDropTarget(el, getTargetPrefix) {
+  function makeDropTarget(el, getTargetPrefix, allowUpload) {
     el.addEventListener('dragover', (e) => {
-      if (!canDropInto(getTargetPrefix())) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drop-hover');
+      if (dragPayload) {
+        if (!canDropInto(getTargetPrefix())) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        el.classList.add('drop-hover');
+        return;
+      }
+      // 外部文件拖到相册卡片上：悬停即把上传目标切换为该相册
+      if (allowUpload && view === 'admin' && hasFilePayload(e.dataTransfer)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        el.classList.add('drop-hover');
+        clearTimeout(uploadHoverTimer);
+        if (uploadTargetPrefix !== getTargetPrefix()) {
+          uploadTargetPrefix = getTargetPrefix();
+          updateDropLabel();
+        }
+      }
     });
-    el.addEventListener('dragleave', () => el.classList.remove('drop-hover'));
-    el.addEventListener('drop', (e) => {
+    el.addEventListener('dragleave', () => {
       el.classList.remove('drop-hover');
-      if (!canDropInto(getTargetPrefix())) return;
-      e.preventDefault();
-      e.stopPropagation();
-      performDrop(getTargetPrefix());
+      if (!dragPayload && allowUpload) {
+        // 移到别的卡片上时先由对方的 dragover 接管，这里延迟复位避免相互打架
+        const t = getTargetPrefix();
+        clearTimeout(uploadHoverTimer);
+        uploadHoverTimer = setTimeout(() => {
+          if (uploadTargetPrefix === t) {
+            uploadTargetPrefix = null;
+            updateDropLabel();
+          }
+        }, 60);
+      }
+    });
+    el.addEventListener('drop', async (e) => {
+      el.classList.remove('drop-hover');
+      if (dragPayload) {
+        if (!canDropInto(getTargetPrefix())) return;
+        e.preventDefault();
+        e.stopPropagation();
+        performDrop(getTargetPrefix());
+        return;
+      }
+      if (allowUpload && view === 'admin' && hasFilePayload(e.dataTransfer)) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadTargetPrefix = null;
+        updateDropLabel();
+        const files = await collectFromDataTransfer(e.dataTransfer);
+        if (files.length) addFiles(files, getTargetPrefix());
+      }
     });
   }
 
@@ -1733,6 +1800,82 @@ h1 { margin: 0; font-size: 20px; }
     }
   }
 
+  // 相册的「重命名 / 移动 / 删除」操作（悬浮按钮与右键菜单共用）
+  async function renameAlbumDialog(prefix, name) {
+    const raw = await promptDialog({
+      title: '重命名 / 移动相册',
+      label: '新的位置（含相册名）',
+      value: name,
+      help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
+      tree: true,
+    });
+    if (raw === null || !String(raw).trim()) return;
+    const newPrefix = parseTargetPrefix(raw);
+    if (!newPrefix) return toast('_picbed 是保留目录名，不能使用', true);
+    if (newPrefix === prefix) return;
+    if (newPrefix.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
+    try {
+      await ensureAlbumPath(galleryPrefix); // 确保父级存在
+    } catch (err) {}
+    await moveFolder(prefix, newPrefix);
+  }
+
+  async function moveAlbumDialog(prefix, name) {
+    const raw = await promptDialog({
+      title: `移动相册「${name}」`,
+      label: '移动到哪个相册',
+      placeholder: '留空 = 移到根目录',
+      help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
+      tree: true,
+    });
+    if (raw === null) return;
+    const targetParent = parseTargetPrefix(raw);
+    if (!targetParent) return toast('_picbed 是保留目录名，不能使用', true);
+    if (targetParent === galleryPrefix) return toast('目标就是当前位置', true);
+    if (targetParent.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
+    try {
+      await ensureAlbumPath(targetParent);
+    } catch (err) {
+      return toast('目标目录创建失败：' + (err.message || err), true);
+    }
+    await moveFolder(prefix, targetParent + name + '/');
+  }
+
+  async function deleteAlbumDialog(prefix, name) {
+    try {
+      const keys = await listAllKeys(prefix);
+      if (!keys.length) return toast('相册为空');
+      const files = keys.filter((k) => !k.endsWith('/'));
+      // 子相册（含空相册）也有零字节标记对象，必须一并删除，否则父相册删不掉
+      const subAlbums = keys.filter((k) => k.endsWith('/') && k !== prefix).length;
+      const extra = subAlbums ? ` 和 ${subAlbums} 个子相册` : '';
+      const ok = await confirmDialog({
+        title: '删除相册',
+        message: `确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`,
+        okText: '删除相册',
+      });
+      if (!ok) return;
+      // 公开标记也要一并清掉，否则会残留指向已删图片的孤儿标记
+      const pubRoot = cfg.prefix + '/_picbed/public/';
+      const rel = prefix.slice((cfg.prefix + '/').length);
+      let pubMarkers = [];
+      if (rel) {
+        try {
+          pubMarkers = await listAllKeys(pubRoot + rel);
+        } catch (e) {
+          pubMarkers = [];
+        }
+      }
+      await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 本相册标记 + 全部子相册标记 + 公开标记
+      pubMarkers.forEach((m) => publicKeys.delete(m.slice(pubRoot.length)));
+      invalidateAlbumTree();
+      toast('相册已删除');
+      loadGallery(true);
+    } catch (err) {
+      toast('删除失败：' + (err.message || err), true);
+    }
+  }
+
   function renderFolderTile(prefix) {
     const name = prefix.slice(0, -1).split('/').pop() || prefix;
     const fig = document.createElement('figure');
@@ -1747,91 +1890,32 @@ h1 { margin: 0; font-size: 20px; }
     const rename = document.createElement('button');
     rename.textContent = '✏️';
     rename.title = '重命名相册（可用 / 创建多级）';
-    rename.onclick = async (e) => {
-      e.stopPropagation();
-      const raw = await promptDialog({
-        title: '重命名 / 移动相册',
-        label: '新的位置（含相册名）',
-        value: name,
-        help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
-        tree: true,
-      });
-      if (raw === null || !String(raw).trim()) return;
-      const newPrefix = parseTargetPrefix(raw);
-      if (!newPrefix) return toast('_picbed 是保留目录名，不能使用', true);
-      if (newPrefix === prefix) return;
-      if (newPrefix.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
-      try {
-        await ensureAlbumPath(galleryPrefix); // 确保父级存在
-      } catch (err) {}
-      await moveFolder(prefix, newPrefix);
-    };
+    rename.onclick = (e) => { e.stopPropagation(); renameAlbumDialog(prefix, name); };
     const move = document.createElement('button');
     move.textContent = '📦';
     move.title = '移动相册到其他位置';
-    move.onclick = async (e) => {
-      e.stopPropagation();
-      const raw = await promptDialog({
-        title: `移动相册「${name}」`,
-        label: '移动到哪个相册',
-        placeholder: '留空 = 移到根目录',
-        help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
-        tree: true,
-      });
-      if (raw === null) return;
-      const targetParent = parseTargetPrefix(raw);
-      if (!targetParent) return toast('_picbed 是保留目录名，不能使用', true);
-      if (targetParent === galleryPrefix) return toast('目标就是当前位置', true);
-      if (targetParent.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
-      try {
-        await ensureAlbumPath(targetParent);
-      } catch (err) {
-        return toast('目标目录创建失败：' + (err.message || err), true);
-      }
-      await moveFolder(prefix, targetParent + name + '/');
-    };
+    move.onclick = (e) => { e.stopPropagation(); moveAlbumDialog(prefix, name); };
     const del = document.createElement('button');
     del.textContent = '🗑️';
     del.title = '删除相册及其全部图片';
-    del.onclick = async (e) => {
-      e.stopPropagation();
-      try {
-        const keys = await listAllKeys(prefix);
-        if (!keys.length) return toast('相册为空');
-        const files = keys.filter((k) => !k.endsWith('/'));
-        // 子相册（含空相册）也有零字节标记对象，必须一并删除，否则父相册删不掉
-        const subAlbums = keys.filter((k) => k.endsWith('/') && k !== prefix).length;
-        const extra = subAlbums ? ` 和 ${subAlbums} 个子相册` : '';
-        const ok = await confirmDialog({
-          title: '删除相册',
-          message: `确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`,
-          okText: '删除相册',
-        });
-        if (!ok) return;
-        // 公开标记也要一并清掉，否则会残留指向已删图片的孤儿标记
-        const pubRoot = cfg.prefix + '/_picbed/public/';
-        const rel = prefix.slice((cfg.prefix + '/').length);
-        let pubMarkers = [];
-        if (rel) {
-          try {
-            pubMarkers = await listAllKeys(pubRoot + rel);
-          } catch (e) {
-            pubMarkers = [];
-          }
-        }
-        await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 本相册标记 + 全部子相册标记 + 公开标记
-        pubMarkers.forEach((m) => publicKeys.delete(m.slice(pubRoot.length)));
-        invalidateAlbumTree();
-        toast('相册已删除');
-        loadGallery(true);
-      } catch (err) {
-        toast('删除失败：' + (err.message || err), true);
-      }
-    };
+    del.onclick = (e) => { e.stopPropagation(); deleteAlbumDialog(prefix, name); };
     actions.append(rename, move, del);
     fig.append(icon, actions, cap);
     fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
-    // 可拖拽（移动相册）也可作为放置目标（接收图片/相册）
+    // 右键菜单：与悬浮按钮相同的操作
+    fig.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCtxMenu(e.clientX, e.clientY, [
+        { label: '📂 打开相册', onClick: () => { galleryPrefix = prefix; loadGallery(true); } },
+        '-',
+        { label: '✏️ 重命名 / 移动相册', onClick: () => renameAlbumDialog(prefix, name) },
+        { label: '📦 移动到其他位置', onClick: () => moveAlbumDialog(prefix, name) },
+        '-',
+        { label: '🗑️ 删除相册', danger: true, onClick: () => deleteAlbumDialog(prefix, name) },
+      ]);
+    });
+    // 可拖拽（移动相册），也可作为放置目标：接收图片/相册，外部文件拖上来则直接上传到该相册
     fig.draggable = true;
     fig.addEventListener('dragstart', (e) => {
       dragPayload = { kind: 'folder', prefix };
@@ -1846,7 +1930,7 @@ h1 { margin: 0; font-size: 20px; }
       fig.classList.remove('dragging');
       dragPayload = null;
     });
-    makeDropTarget(fig, () => prefix);
+    makeDropTarget(fig, () => prefix, true);
     return fig;
   }
 
@@ -1941,9 +2025,90 @@ h1 { margin: 0; font-size: 20px; }
     updateBulkBar();
   }
 
+  // ---------- 拖动框选 ----------
+  // 多选模式下，在网格空白处按下并拖动出一个选择框，框到的图片都会被选中；
+  // Ctrl/Cmd 按住则为追加模式，保留原有选择
+  $('galleryGrid').addEventListener('mousedown', (e) => {
+    if (!selectMode || view !== 'admin' || e.button !== 0) return;
+    if (e.target.closest('figure')) return; // 卡片上的按下交给点击/拖拽处理
+    e.preventDefault();
+    const gridRect = $('galleryGrid').getBoundingClientRect();
+    const marquee = $('marquee');
+    const additive = !!(e.ctrlKey || e.metaKey);
+    const base = new Map(); // 按下时每张卡的选中状态（追加模式下移出框时恢复）
+    selectableFigs().forEach((f) => base.set(f, f.classList.contains('selected')));
+    if (!additive) clearSelection();
+    document.body.classList.add('marqueeing');
+    const sx = e.clientX, sy = e.clientY;
+    let drawn = false;
+    const paint = (cx, cy) => {
+      const x1 = Math.max(gridRect.left, Math.min(sx, cx));
+      const x2 = Math.min(gridRect.right, Math.max(sx, cx));
+      const y1 = Math.max(gridRect.top, Math.min(sy, cy));
+      const y2 = Math.min(gridRect.bottom, Math.max(sy, cy));
+      marquee.hidden = false;
+      marquee.style.left = x1 + 'px';
+      marquee.style.top = y1 + 'px';
+      marquee.style.width = Math.max(0, x2 - x1) + 'px';
+      marquee.style.height = Math.max(0, y2 - y1) + 'px';
+      for (const fig of selectableFigs()) {
+        const r = fig.getBoundingClientRect();
+        const hit = r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1;
+        setFigSelected(fig, hit || (additive && base.get(fig)));
+      }
+      updateBulkBar();
+      drawn = true;
+    };
+    const stop = () => {
+      document.body.classList.remove('marqueeing');
+      marquee.hidden = true;
+      window.removeEventListener('mousemove', paint);
+      window.removeEventListener('mouseup', stop);
+      if (drawn) {
+        const first = selectableFigs().find((f) => f.classList.contains('selected'));
+        if (first) anchorFig = first;
+      }
+    };
+    window.addEventListener('mousemove', paint);
+    window.addEventListener('mouseup', stop);
+  });
+
   function clearSelection() {
     selectedKeys.clear();
     document.querySelectorAll('#galleryGrid figure.selected').forEach((f) => f.classList.remove('selected'));
+    anchorFig = null;
+    updateBulkBar();
+  }
+
+  // ---------- 多选辅助（全选 / 反选 / Shift 连选） ----------
+  function selectableFigs() {
+    return [...document.querySelectorAll('#galleryGrid figure.selectable')];
+  }
+  function setFigSelected(fig, on) {
+    if (on) { selectedKeys.add(fig.dataset.key); fig.classList.add('selected'); }
+    else { selectedKeys.delete(fig.dataset.key); fig.classList.remove('selected'); }
+  }
+  function selectAllImages() {
+    const figs = selectableFigs();
+    if (!figs.length) return toast('当前目录没有可选的图片');
+    figs.forEach((f) => setFigSelected(f, true));
+    updateBulkBar();
+  }
+  function invertSelection() {
+    selectableFigs().forEach((f) => setFigSelected(f, !selectedKeys.has(f.dataset.key)));
+    updateBulkBar();
+  }
+  // Shift 连选：从锚点卡片到目标卡片（DOM 顺序）整段选中；Ctrl+Shift 时保留原选择
+  function selectRange(fromFig, toFig, additive) {
+    const figs = selectableFigs();
+    const a = figs.indexOf(fromFig);
+    const b = figs.indexOf(toFig);
+    if (a < 0 || b < 0) return;
+    if (!additive) {
+      clearSelection();
+      anchorFig = fromFig; // 替换选择后锚点保持不变，连续 Shift+单击可持续扩展
+    }
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) setFigSelected(figs[i], true);
     updateBulkBar();
   }
 
@@ -1951,15 +2116,18 @@ h1 { margin: 0; font-size: 20px; }
     const bar = $('bulkBar');
     const n = selectedKeys.size;
     $('bulkCount').textContent = `已选 ${n} 张`;
-    bar.hidden = !n;
+    bar.hidden = !selectMode; // 多选模式下常驻，便于使用全选/反选
+    $('bulkMoveBtn').disabled = !n;
+    $('bulkPublicBtn').disabled = !n;
+    $('bulkDeleteBtn').disabled = !n;
     if (n) {
       const allPublic = [...selectedKeys].every((k) => publicKeys.has(pubRelOf(k)));
       $('bulkPublicBtn').textContent = allPublic ? '🌑 取消公开' : '🌍 设为公开';
     }
   }
 
-  async function bulkMove() {
-    const keys = [...selectedKeys];
+  // 图片「移动到相册」弹窗（批量栏与右键菜单共用）
+  async function moveImagesDialog(keys) {
     if (!keys.length) return;
     const raw = await promptDialog({
       title: `移动 ${keys.length} 张图片`,
@@ -1975,26 +2143,59 @@ h1 { margin: 0; font-size: 20px; }
     await moveImagesTo(keys, target);
   }
 
-  async function bulkDelete() {
-    const keys = [...selectedKeys];
+  // 删除图片（连带清理公开标记）：批量栏、右键菜单、灯箱共用
+  async function deleteImages(keys) {
+    const markers = keys.filter((k) => publicKeys.has(pubRelOf(k))).map(pubMarkerOf);
+    await deleteKeysP(keys.concat(markers));
+    keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
+    toast('已删除');
+    clearSelection();
+    loadGallery(true);
+  }
+  async function deleteImagesDialog(keys) {
     if (!keys.length) return;
     const ok = await confirmDialog({
-      title: '批量删除',
+      title: keys.length > 1 ? '批量删除' : '删除图片',
       message: `确定删除选中的 ${keys.length} 张图片？此操作不可恢复。`,
       okText: '删除',
     });
     if (!ok) return;
     try {
-      const markers = keys.filter((k) => publicKeys.has(pubRelOf(k))).map(pubMarkerOf);
-      await deleteKeysP(keys.concat(markers));
-      keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
-      toast('已删除');
-      clearSelection();
-      loadGallery(true);
+      await deleteImages(keys);
     } catch (err) {
       toast('删除失败：' + (err.message || err), true);
     }
   }
+
+  // ---------- 右键菜单 ----------
+  function hideCtxMenu() { $('ctxMenu').hidden = true; }
+  function showCtxMenu(x, y, items) {
+    const menu = $('ctxMenu');
+    menu.textContent = '';
+    for (const it of items) {
+      if (it === '-') {
+        const s = document.createElement('div');
+        s.className = 'ctx-sep';
+        menu.appendChild(s);
+        continue;
+      }
+      const b = document.createElement('button');
+      b.textContent = it.label;
+      if (it.danger) b.className = 'danger';
+      b.onclick = () => { hideCtxMenu(); it.onClick(); };
+      menu.appendChild(b);
+    }
+    menu.hidden = false;
+    menu.style.left = Math.min(x, window.innerWidth - menu.offsetWidth - 8) + 'px';
+    menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 8) + 'px';
+  }
+  document.addEventListener('click', hideCtxMenu);
+  window.addEventListener('blur', hideCtxMenu);
+  window.addEventListener('scroll', hideCtxMenu, true);
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('#ctxMenu')) { e.preventDefault(); hideCtxMenu(); return; }
+    if (!e.target.closest('#galleryGrid')) hideCtxMenu();
+  });
 
   function renderGridItem(it, mode) {
     const isPublic = mode === 'public';
@@ -2015,17 +2216,40 @@ h1 { margin: 0; font-size: 20px; }
       if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.key); }
       else fig.remove();
     };
+    const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
-    cap.textContent = it.key.split('/').pop();
+    if (!isPublic) {
+      // 文件名前的公开状态徽标：不悬停也能看到是否公开
+      const badge = document.createElement('span');
+      badge.className = 'pub-badge';
+      badge.textContent = 'pub';
+      badge.hidden = true;
+      cap.appendChild(badge);
+    }
+    cap.appendChild(document.createTextNode(name));
     fig.append(img, cap);
+    const links = makeLinks(publicUrl(it.key), name);
     if (isPublic) {
       // 游客视图：只读，点击看大图
       fig.onclick = () => openLightbox(it);
+      fig.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showCtxMenu(e.clientX, e.clientY, [
+          { label: '🔍 查看大图', onClick: () => openLightbox(it) },
+          '-',
+          { label: '🔗 复制 URL', onClick: () => copyText(links.url) },
+          { label: '📝 复制 Markdown', onClick: () => copyText(links.markdown) },
+          { label: '🧩 复制 HTML', onClick: () => copyText(links.html) },
+        ]);
+      });
       return fig;
     }
-    // 公开状态切换
+    // 公开状态切换：先给默认值，公开状态加载完成前按钮也不会空白
     const pub = document.createElement('button');
     pub.className = 'pub-toggle';
+    pub.textContent = '🌑';
+    pub.title = '设为公开（游客可见）';
     pub.onclick = (e) => { e.stopPropagation(); togglePublic(it.key); };
     fig.appendChild(pub);
     // 拖拽移动：多选模式下拖动已选中的图片会移动整批
@@ -2044,20 +2268,39 @@ h1 { margin: 0; font-size: 20px; }
       fig.classList.remove('dragging');
       dragPayload = null;
     });
-    fig.onclick = () => {
-      if (selectMode) {
-        if (selectedKeys.has(it.key)) {
-          selectedKeys.delete(it.key);
-          fig.classList.remove('selected');
-        } else {
-          selectedKeys.add(it.key);
-          fig.classList.add('selected');
-        }
-        updateBulkBar();
+    // 多选：单击选中、Ctrl/Cmd+单击反选、Shift+单击连选
+    fig.onclick = (e) => {
+      if (!selectMode) { openLightbox(it); return; }
+      if (e.shiftKey && anchorFig && anchorFig !== fig) {
+        selectRange(anchorFig, fig, !!(e.ctrlKey || e.metaKey));
+      } else if (e.ctrlKey || e.metaKey) {
+        setFigSelected(fig, !selectedKeys.has(fig.dataset.key));
+        anchorFig = fig;
       } else {
-        openLightbox(it);
+        clearSelection();
+        setFigSelected(fig, true);
+        anchorFig = fig;
       }
+      updateBulkBar();
     };
+    // 右键菜单：常用的单图操作
+    fig.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const on = publicKeys.has(pubRelOf(it.key));
+      showCtxMenu(e.clientX, e.clientY, [
+        { label: '🔍 查看大图', onClick: () => openLightbox(it) },
+        '-',
+        { label: '🔗 复制 URL', onClick: () => copyText(links.url) },
+        { label: '📝 复制 Markdown', onClick: () => copyText(links.markdown) },
+        { label: '🧩 复制 HTML', onClick: () => copyText(links.html) },
+        '-',
+        { label: on ? '🌑 取消公开' : '🌍 设为公开', onClick: () => togglePublic(it.key) },
+        { label: '📦 移动到相册…', onClick: () => moveImagesDialog([it.key]) },
+        '-',
+        { label: '🗑️ 删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
+      ]);
+    });
     return fig;
   }
 
@@ -2162,27 +2405,34 @@ h1 { margin: 0; font-size: 20px; }
     addFiles(files);
     e.target.value = '';
   };
+  // 上传目标提示：悬停在子相册上时显示该相册名
+  function updateDropLabel() {
+    const p = uploadTargetPrefix || galleryPrefix;
+    const name = p === cfg.prefix + '/' ? '全部图片' : (p.slice(0, -1).split('/').pop() || '全部图片');
+    $('dropTargetLabel').textContent = `松开鼠标，上传到「${name}」`;
+  }
   let dragDepth = 0;
   window.addEventListener('dragenter', (e) => {
     if (view !== 'admin') return; // 游客视图不接受上传
-    if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files')) return;
+    if (!hasFilePayload(e.dataTransfer)) return;
     e.preventDefault();
     dragDepth++;
     $('dropOverlay').hidden = false;
-    const cur = galleryPrefix === cfg.prefix + '/'
-      ? '全部图片'
-      : (galleryPrefix.slice(0, -1).split('/').pop() || '全部图片');
-    $('dropTargetLabel').textContent = `松开鼠标，上传到「${cur}」`;
+    updateDropLabel();
   });
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('dragleave', () => {
     dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) $('dropOverlay').hidden = true;
+    if (dragDepth === 0) {
+      $('dropOverlay').hidden = true;
+      uploadTargetPrefix = null;
+    }
   });
   window.addEventListener('drop', async (e) => {
     e.preventDefault();
     dragDepth = 0;
     $('dropOverlay').hidden = true;
+    uploadTargetPrefix = null; // 拖到相册卡片之外时保持「上传到当前相册」
     if (view !== 'admin') return;
     const files = await collectFromDataTransfer(e.dataTransfer);
     if (files.length) addFiles(files);
@@ -2226,9 +2476,11 @@ h1 { margin: 0; font-size: 20px; }
   $('loadMore').onclick = () => (view === 'public' ? loadPublicGallery(false) : loadGallery(false));
   $('newAlbumBtn').onclick = newAlbum;
   $('selectModeBtn').onclick = toggleSelectMode;
-  $('bulkMoveBtn').onclick = bulkMove;
+  $('bulkSelectAllBtn').onclick = selectAllImages;
+  $('bulkInvertBtn').onclick = invertSelection;
+  $('bulkMoveBtn').onclick = () => moveImagesDialog([...selectedKeys]);
   $('bulkPublicBtn').onclick = bulkTogglePublic;
-  $('bulkDeleteBtn').onclick = bulkDelete;
+  $('bulkDeleteBtn').onclick = () => deleteImagesDialog([...selectedKeys]);
   $('bulkCancelBtn').onclick = clearSelection;
   // 视图切换
   $('tabPublic').onclick = () => { if (view !== 'public') switchView('public'); };
@@ -2248,25 +2500,18 @@ h1 { margin: 0; font-size: 20px; }
     if (!lightboxItem) return;
     // 弹窗等待期间灯箱可能被关闭（closeLightbox 会清空 lightboxItem），先把 key 记下来
     const key = lightboxItem.key;
-    const rel = pubRelOf(key);
-    const wasPublic = publicKeys.has(rel);
     const ok = await confirmDialog({
       title: '删除图片',
       message: '确定删除这张图片？此操作不可恢复。',
       okText: '删除',
     });
     if (!ok) return;
-    cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err) => {
-      if (err) return toast('删除失败：' + (err.message || err), true);
-      if (wasPublic) {
-        // 同时清掉公开标记，避免残留孤儿
-        publicKeys.delete(rel);
-        deleteKeysP([pubMarkerOf(key)]).catch(() => {});
-      }
-      toast('已删除（走 CDN 的话缓存可能仍短暂可见）');
-      closeLightbox();
-      loadGallery(true);
-    });
+    closeLightbox();
+    try {
+      await deleteImages([key]); // 连带清理公开标记
+    } catch (err) {
+      toast('删除失败（走 CDN 的话缓存可能仍短暂可见）：' + (err.message || err), true);
+    }
   };
   $('togglePublicBtn').onclick = () => { if (lightboxItem) togglePublic(lightboxItem.key); };
   $('lightboxClose').onclick = closeLightbox;
@@ -2277,15 +2522,26 @@ h1 { margin: 0; font-size: 20px; }
   $('panelClose').onclick = closePanel;
   $('panelBackdrop').onclick = closePanel;
 
-  // Esc：只关闭最上面的一层（弹窗 > 灯箱 > 面板）
+  // Esc：只关闭最上面的一层（右键菜单 > 弹窗 > 灯箱 > 面板）；Ctrl/Cmd+A：多选模式下全选
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!$('promptDialog').hidden) { $('promptCancel').click(); return; }
-    if (!$('confirmDialog').hidden) { $('confirmCancel').click(); return; }
-    if (!$('settingsDialog').hidden) { closeSettings(); return; }
-    if (!$('dupDialog').hidden) { $('dupSkip').click(); return; }
-    if (!$('lightbox').hidden) { closeLightbox(); return; }
-    if (!$('uploadPanel').hidden) { closePanel(); }
+    if (e.key === 'Escape') {
+      if (!$('ctxMenu').hidden) { hideCtxMenu(); return; }
+      if (!$('promptDialog').hidden) { $('promptCancel').click(); return; }
+      if (!$('confirmDialog').hidden) { $('confirmCancel').click(); return; }
+      if (!$('settingsDialog').hidden) { closeSettings(); return; }
+      if (!$('dupDialog').hidden) { $('dupSkip').click(); return; }
+      if (!$('lightbox').hidden) { closeLightbox(); return; }
+      if (!$('uploadPanel').hidden) { closePanel(); }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'a') {
+      if (view !== 'admin' || !selectMode) return;
+      const t = e.target;
+      const tag = t && t.tagName ? String(t.tagName).toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+      e.preventDefault();
+      selectAllImages();
+    }
   });
 
   // ---------- 初始化 ----------
