@@ -148,7 +148,11 @@ wrangler deploy
      "statement": [
        {
          "effect": "allow",
-         "action": ["name/ssl:UploadCertificate"],
+         "action": [
+           "name/ssl:UploadCertificate",
+           "name/ssl:DescribeCertificates",
+           "name/ssl:DeleteCertificate"
+         ],
          "resource": ["*"]
        },
        {
@@ -164,6 +168,8 @@ wrangler deploy
    ```
 
    > 若策略编辑器里搜不到上面的 `cos:` action（接口较新），可暂时改用 `name/cos:*`。
+   >
+   > 如果子账号之前已按旧版策略创建过（缺 `ssl:DescribeCertificates` / `ssl:DeleteCertificate`），在策略列表里编辑该策略补上这两个 action 即可，无需重建子账号。
 
 3. **配置 GitHub Secrets**：仓库 → Settings → Secrets and variables → Actions，新增 4 个 secret：
 
@@ -183,7 +189,7 @@ wrangler deploy
 - 每周一自动跑（北京时间周二凌晨）；失败时 GitHub 会发邮件到账号邮箱
 - 公开仓库的定时任务在 60 天无提交后会被 GitHub 停用，保持仓库有 push 即可（手动 Run workflow 不受影响）
 - acme.sh 的账号/证书状态（含 Cloudflare Token）存在 workflow artifact 里，仅本仓库有权限的 token 可读取，不会对外公开；轮换 Cloudflare Token 后手动「强制重新签发」跑一次即可
-- 每次换证都会在 SSL 证书管理里新增一条证书（约每 90 天一条），旧证书到期后可手动清理
+- 每次换证都会在 SSL 证书管理里新增一条证书；旧证书过期后由脚本自动清理删除（仅清理本域名、状态已过期、未关联云资源的上传证书，其余证书不受影响）
 
 ## 使用说明
 

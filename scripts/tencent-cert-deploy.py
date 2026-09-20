@@ -6,6 +6,7 @@
    相同证书已存在时返回 RepeatCertId，直接复用，避免证书列表堆积
 2. PUT Bucket domaincertificate（COS XML API V5 签名）→ 绑定到 COS 自定义域名
 3. GET Bucket domaincertificate 校验绑定状态为 Enabled
+4. 清理同域名已过期且未关联云资源的证书（尽力而为，失败不阻断主流程）
 
 仅使用 Python 标准库，无需 pip 安装，可直接在 GitHub Actions 的 runner 上运行。
 
@@ -173,7 +174,7 @@ def main():
         key_pem = f.read()
 
     # 1. 上传到 SSL 证书管理（相同证书已存在时复用，不重复上传）
-    print(f"[1/3] 上传证书到腾讯云 SSL 证书管理（{args.domain}）...")
+    print(f"[1/4] 上传证书到腾讯云 SSL 证书管理（{args.domain}）...")
     resp = tc3_request(secret_id, secret_key, "ssl", "UploadCertificate", "2019-12-05", {
         "CertificatePublicKey": cert_pem,
         "CertificatePrivateKey": key_pem,
@@ -191,7 +192,7 @@ def main():
           + ("（相同证书已存在，复用）" if data.get("RepeatCertId") else ""))
 
     # 2. 绑定到 COS 存储桶的自定义域名
-    print(f"[2/3] 绑定证书到 COS 自定义域名 {args.domain}（{args.bucket}）...")
+    print(f"[2/4] 绑定证书到 COS 自定义域名 {args.domain}（{args.bucket}）...")
     xml_body = (
         "<DomainCertificate>"
         "<CertificateInfo>"
@@ -213,7 +214,7 @@ def main():
         raise RuntimeError(f"绑定失败 HTTP {status}: {text}")
 
     # 3. 校验绑定状态
-    print("[3/3] 校验 COS 域名证书绑定状态...")
+    print("[3/4] 校验 COS 域名证书绑定状态...")
     status, text = cos_request(secret_id, secret_key, "GET", args.bucket, args.region,
                                {"domaincertificate": "", "domainname": args.domain})
     if not 200 <= status < 300:
@@ -225,6 +226,55 @@ def main():
         state = None
     if state != "Enabled":
         raise RuntimeError(f"校验失败：绑定状态为 {state!r}（响应：{text}）")
+
+    # 4. 清理同域名已过期且未关联云资源的证书（尽力而为，不阻断主流程）
+    print("[4/4] 清理同域名已过期的历史证书...")
+    cleaned = 0
+    try:
+        offset = 0
+        total = None
+        for _ in range(5):  # 最多翻 5 页，正常场景远用不完
+            resp = tc3_request(secret_id, secret_key, "ssl", "DescribeCertificates",
+                               "2019-12-05", {
+                                   "Limit": 100,
+                                   "Offset": offset,
+                                   "SearchKey": args.domain,
+                                   "CertificateStatus": [3],  # 3 = 已过期
+                                   "FilterSource": "upload",  # 只看上传证书，不碰腾讯云签发/托管的
+                               })
+            data = resp.get("Response") or {}
+            if "Error" in data:
+                raise tc3_error(resp, "DescribeCertificates")
+            certs = data.get("Certificates") or []
+            total = data.get("TotalCount", 0)
+            for c in certs:
+                cid = c.get("CertificateId") or ""
+                if cid == cert_id:
+                    continue
+                # 只清理本域名的证书；SearchKey 是模糊匹配，这里再做精确校验
+                if c.get("Domain") != args.domain and c.get("Alias") != args.domain:
+                    continue
+                if c.get("DeployedResources"):
+                    print(f"    跳过 {cid}：仍关联云资源，无法自动删除")
+                    continue
+                try:
+                    r = tc3_request(secret_id, secret_key, "ssl", "DeleteCertificate",
+                                    "2019-12-05", {"CertificateId": cid})
+                    rd = r.get("Response") or {}
+                    if "Error" in rd:
+                        print(f"    跳过 {cid}：{rd['Error'].get('Code')} - {rd['Error'].get('Message')}")
+                    else:
+                        cleaned += 1
+                        print(f"    已删除过期证书 {cid}（{c.get('Alias') or c.get('Domain')}）")
+                except RuntimeError as e:
+                    print(f"    跳过 {cid}：{e}")
+            offset += len(certs)
+            if not certs or offset >= total:
+                break
+    except RuntimeError as e:
+        print(f"    清理步骤跳过（不影响主流程）：{e}")
+    if not cleaned:
+        print("    无需要清理的过期证书")
 
     print(f"完成：证书 {cert_id} 已绑定到 {args.domain}，状态 Enabled")
 
