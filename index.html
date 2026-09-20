@@ -179,7 +179,8 @@ h1 { margin: 0; font-size: 20px; }
 .gallery-more { text-align: center; margin-top: 14px; }
 
 /* 设置弹窗 */
-.dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+/* z-index 70：必须盖过灯箱（60），灯箱里点删除弹出的确认框才可见 */
+.dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 16px; }
 .dialog-box { background: var(--panel); border-radius: var(--radius); padding: 20px 22px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
 .dialog-box h2 { margin: 0 0 14px; font-size: 16px; }
 .dialog-box p { margin: 0 0 14px; color: var(--muted); word-break: break-all; }
@@ -2245,15 +2246,16 @@ h1 { margin: 0; font-size: 20px; }
   $('clearHistory').onclick = () => { history = []; persistHistory(); renderHistory(); };
   $('deleteBtn').onclick = async () => {
     if (!lightboxItem) return;
+    // 弹窗等待期间灯箱可能被关闭（closeLightbox 会清空 lightboxItem），先把 key 记下来
+    const key = lightboxItem.key;
+    const rel = pubRelOf(key);
+    const wasPublic = publicKeys.has(rel);
     const ok = await confirmDialog({
       title: '删除图片',
       message: '确定删除这张图片？此操作不可恢复。',
       okText: '删除',
     });
     if (!ok) return;
-    const key = lightboxItem.key;
-    const rel = pubRelOf(key);
-    const wasPublic = publicKeys.has(rel);
     cos.deleteObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err) => {
       if (err) return toast('删除失败：' + (err.message || err), true);
       if (wasPublic) {
