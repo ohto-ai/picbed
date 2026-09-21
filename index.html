@@ -936,23 +936,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return Math.min(SK_MAX, cols * rows);
   }
 
-  // 缩略图边长：按格子实际宽度 × 屏幕像素比算，不再写死 500。
-  // 两个要点：
-  //   1. 格子里只显示居中的正方形（.grid img 是 aspect-ratio:1 + object-fit:cover），
-  //      决定清晰度的是原图**短边**；而 imageMogr2/thumbnail 只能按长边限制，
-  //      常见的 4:3 / 3:4 短边是长边的 0.75，所以要留 4/3 的余量。
-  //   2. 量化到 50px 台阶：否则每个视口宽度都算出一个新 URL，缓存会被打散。
-  const THUMB_DPR_CAP = 2;      // 屏幕像素比封顶 2x；3x 屏再多 2.25 倍像素，观感提升很小
-  const THUMB_ASPECT_PAD = 4 / 3;
-  const THUMB_STEP = 50;
-  const THUMB_FALLBACK = 500;   // 布局未就绪时的保守值
+  // 缩略图边长 = 格子实际宽度 × 屏幕像素比。
+  // 这里能直接乘、不留余量，是因为用的是 crop 而不是 thumbnail：
+  // 格子只显示居中的正方形（.grid img 是 aspect-ratio:1 + object-fit:cover），
+  // crop/NxN/gravity/center 裁出来的正好就是那一块，和显示区域一比一对应。
+  // （thumbnail 只能按长边限制，而正方形取的是短边，横向的图会白白多下 25%~44%）
+  const THUMB_DPR_CAP = 2;    // 屏幕像素比封顶 2x；3x 屏再多 2.25 倍像素，观感提升很小
+  const THUMB_STEP = 50;      // 量化到 50px 台阶：否则每个视口宽度都算出一个新 URL，缓存会被打散
+  const THUMB_MIN = 200;
+  const THUMB_MAX = 1000;
+  const THUMB_FALLBACK = 500; // 布局未就绪时的保守值
 
   function thumbSize() {
     const tile = gridTileSize();
     if (!tile) return THUMB_FALLBACK;
     const dpr = Math.min(window.devicePixelRatio || 1, THUMB_DPR_CAP);
-    const need = tile * dpr * THUMB_ASPECT_PAD;
-    return Math.min(1000, Math.max(200, Math.ceil(need / THUMB_STEP) * THUMB_STEP));
+    const need = tile * dpr;
+    return Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.ceil(need / THUMB_STEP) * THUMB_STEP));
   }
 
   function showGridLoader(opts) {
@@ -2786,9 +2786,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       fig.appendChild(check);
     }
     const rawUrl = publicUrl(it.key);
-    // SVG 是矢量图、ICO 是图标容器：位图缩略图对它们没有意义（服务端也不支持），
+    // SVG 是矢量图、ICO 是图标容器：位图处理对它们没有意义（服务端也不支持），
     // 直接取原图，省掉一次注定失败的往返。
-    // 用 NxN> 而不是 Nx：后者是把宽度"设成" N（小图会被放大），前者是长边不超过 N 且只缩不放。
+    // crop 而不是 thumbnail：格子只显示居中正方形，crop 裁出来的就是那一块。
+    // 原图比 N 小时 crop 缩不动、原样返回（已实测不会放大），所以小图是安全的。
     const useThumb = !!thumbN && !/\.(svg|ico)$/i.test(it.key);
     const img = document.createElement('img');
     img.loading = 'lazy';
@@ -2800,7 +2801,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    img.src = useThumb ? rawUrl + '?imageMogr2/thumbnail/' + thumbN + 'x' + thumbN + '>' : rawUrl;
+    img.src = useThumb ? rawUrl + '?imageMogr2/crop/' + thumbN + 'x' + thumbN + '/gravity/center' : rawUrl;
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
