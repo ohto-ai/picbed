@@ -4,85 +4,190 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PicBed 图床</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%96%BC%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='11.5' cy='11.5' r='2.4' fill='%23fff'/%3E%3Cpath d='M4.5 22.4l5.6-5.6a2.1 2.1 0 0 1 2.97 0l3.6 3.6 1.9-1.9a2.1 2.1 0 0 1 2.97 0l3.96 3.96v1.44A2.1 2.1 0 0 1 23.4 26H6.6a2.1 2.1 0 0 1-2.1-2.1z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
 :root {
   color-scheme: light dark;
-  --bg: #f5f6f8;
+  /* 画布与文字 */
+  --bg: #f5f7fb;
+  --text: #0f1419;
+  --muted: #667085;
+  /* 面板与描边（半透明，配合 backdrop-filter 做毛玻璃） */
   --panel: #ffffff;
-  --text: #1a1d24;
-  --muted: #6b7280;
-  --border: #e4e7ec;
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.90);
+  --border: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  /* 品牌：--accent 用于文字/描边（需在浅底上可读），--grad 用于填充面（配白字） */
   --accent: #2563eb;
-  --accent-strong: #1d4ed8;
-  --accent-soft: rgba(37, 99, 235, 0.10);
+  --accent-soft: rgba(59, 130, 246, 0.10);
+  --grad: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  --grad-hover: linear-gradient(135deg, #2563eb, #7c3aed);
+  /* 语义色 */
   --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.10);
   --ok: #16a34a;
-  --shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
-  --radius: 12px;
+  --ok-soft: rgba(22, 163, 74, 0.12);
+  /* 分层阴影与圆角 */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 18px 44px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.08);
+  --shadow: var(--shadow-md);
+  --ring: 0 0 0 3px rgba(59, 130, 246, 0.32);
+  --radius: 14px;
+  --radius-sm: 10px;
+  /* 背景光晕：只出现在页面顶部，到图片网格前已衰减到接近透明 */
+  --glow-1: rgba(59, 130, 246, 0.20);
+  --glow-2: rgba(139, 92, 246, 0.16);
+  /* 顶栏高度，由 JS 用 ResizeObserver 写回，供吸顶元素避让 */
+  --appbar-h: 64px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12141a;
-    --panel: #1b1e27;
-    --text: #e6e8ee;
-    --muted: #8b93a5;
-    --border: #2a2f3d;
-    --accent: #3b82f6;
-    --accent-strong: #60a5fa;
-    --accent-soft: rgba(59, 130, 246, 0.16);
+    --bg: #0b0d13;
+    --text: #e8eaf0;
+    --muted: #98a1b3;
+    --panel: #161923;
+    --glass: rgba(20, 23, 33, 0.72);
+    --glass-strong: rgba(20, 23, 33, 0.90);
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --accent: #7cb0ff;
+    --accent-soft: rgba(96, 165, 250, 0.16);
+    --grad: linear-gradient(135deg, #3b82f6, #a855f7);
+    --grad-hover: linear-gradient(135deg, #60a5fa, #c084fc);
     --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, 0.14);
     --ok: #4ade80;
-    --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    --ok-soft: rgba(74, 222, 128, 0.14);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.6);
+    --ring: 0 0 0 3px rgba(124, 176, 255, 0.38);
+    --glow-1: rgba(59, 130, 246, 0.22);
+    --glow-2: rgba(168, 85, 247, 0.18);
   }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; }
+/* 底色放在 html 上、body 保持透明：这样 body::before 的光晕（z-index:-1）
+   才会落在画布底色之上，而不是被 body 自己的背景盖住 */
+html { background: var(--bg); }
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* 背景光晕：两团大半径蓝紫渐变，压在视口顶部，径向衰减到 62% 处已消失 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(680px 420px at 6% -10%, var(--glow-1), transparent 62%),
+    radial-gradient(760px 460px at 94% -14%, var(--glow-2), transparent 66%);
 }
 .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px 64px; }
 
-/* 头部 */
-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 20px 0 12px; }
-.brand { display: flex; align-items: center; gap: 12px; }
-.logo { font-size: 30px; }
-h1 { margin: 0; font-size: 20px; }
+/* 图标：统一 1.15em、1.75 描边，跟随 currentColor。--grad 面上的图标用 .ic-solid */
+.ic { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.ic.ic-solid { fill: currentColor; stroke: none; }
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* 顶栏：吸顶毛玻璃，滚动画廊时标签页与 GitHub 入口常驻 */
+.appbar {
+  position: sticky; top: 0; z-index: 8;
+  background: var(--glass);
+  border-bottom: 1px solid var(--border);
+}
+.appbar-inner {
+  max-width: 920px; margin: 0 auto; padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.logo {
+  width: 40px; height: 40px; flex: none; border-radius: 12px;
+  display: grid; place-items: center;
+  background: var(--grad);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.32);
+}
+.logo .ic { width: 22px; height: 22px; color: #fff; }
+h1 {
+  margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em;
+  background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 .brand p { margin: 0; font-size: 12px; color: var(--muted); }
+.appbar-spacer { flex: 1; }
 
 /* 视图切换（公开 / 我的相册） */
-.tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
-.tabs button { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 6px 14px; border-radius: 8px; white-space: nowrap; }
+.tabs { display: flex; gap: 3px; background: var(--glass-strong); border: 1px solid var(--border); border-radius: 11px; padding: 3px; }
+.tabs button {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; color: var(--muted); cursor: pointer;
+  font-size: 13px; font-family: inherit; padding: 7px 14px; border-radius: 8px; white-space: nowrap;
+  transition: color .16s, background .16s, box-shadow .16s;
+}
+.tabs button .ic { width: 15px; height: 15px; }
 .tabs button:hover { color: var(--text); }
-.tabs button.active { background: var(--accent); color: #fff; }
+.tabs button.active { background: var(--grad); color: #fff; box-shadow: var(--shadow-sm); }
 .view-public .admin-only { display: none !important; }
+
+/* 毛玻璃：不支持 backdrop-filter 时保持上面的不透明底色 */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .appbar { -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7); }
+}
 
 /* 按钮 */
 .btn {
+  display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--border); background: var(--panel); color: var(--text);
-  border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer;
-  transition: background .15s, border-color .15s;
+  border-radius: var(--radius-sm); padding: 7px 14px; font-size: 13px; font-family: inherit;
+  cursor: pointer; white-space: nowrap; text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: background .16s, border-color .16s, box-shadow .16s, transform .1s, color .16s;
 }
-.btn:hover { border-color: var(--accent); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover { background: var(--accent-strong); }
-.btn.ghost { background: transparent; }
-.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.btn:active { transform: translateY(1px); box-shadow: var(--shadow-sm); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn .ic { width: 15px; height: 15px; }
+.btn.primary { background: var(--grad); border-color: transparent; color: #fff; }
+.btn.primary:hover { background: var(--grad-hover); }
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.btn.ghost:hover { background: var(--accent-soft); border-color: transparent; box-shadow: none; }
+.btn.small { padding: 4px 10px; font-size: 12px; gap: 4px; }
+.btn.small .ic { width: 13px; height: 13px; }
 .btn.danger { color: var(--danger); }
-.btn.danger:hover { border-color: var(--danger); }
-.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+.btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; transform: none; }
 
-/* 面包屑导航（GitHub 风格，紧贴图片上方并吸顶） */
-.gallery-path { position: sticky; top: 8px; z-index: 6; display: flex; align-items: center; flex-wrap: wrap; font-size: 16px; margin: 14px 0 12px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
-.gallery-path .crumb { border: none; background: none; color: var(--accent); cursor: pointer; font-size: 15px; padding: 3px 10px; border-radius: 6px; }
+/* 面包屑导航：吸顶，避让顶栏高度 */
+.gallery-path {
+  position: sticky; top: calc(var(--appbar-h) + 8px); z-index: 6;
+  display: flex; align-items: center; flex-wrap: wrap;
+  margin: 14px 0 12px; padding: 7px 12px;
+  background: var(--glass-strong); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.gallery-path .crumb {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; color: var(--accent); cursor: pointer;
+  font-size: 13px; font-family: inherit; padding: 4px 10px; border-radius: 7px;
+  transition: background .15s;
+}
+.gallery-path .crumb .ic { width: 14px; height: 14px; }
 .gallery-path .crumb:hover { background: var(--accent-soft); }
-.gallery-path .sep { color: var(--muted); }
-.gallery-path .crumb.current { font-weight: 700; color: var(--text); cursor: default; }
+.gallery-path .sep { color: var(--muted); opacity: .6; font-size: 12px; }
+.gallery-path .crumb.current { font-weight: 650; color: var(--text); cursor: default; }
 .gallery-path .crumb.current:hover { background: none; }
 .gallery-path .crumb.drop-hover { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -2px; }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .gallery-path { -webkit-backdrop-filter: blur(14px) saturate(1.7); backdrop-filter: blur(14px) saturate(1.7); }
+}
 
 /* 拖拽移动反馈 */
 .grid figure.dragging { opacity: .4; }
@@ -90,174 +195,288 @@ h1 { margin: 0; font-size: 20px; }
 .grid figure.drop-hover .folder-icon { transform: scale(1.08); }
 
 /* 全页拖放遮罩 */
-#dropOverlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; pointer-events: none; }
-.drop-overlay-box { background: var(--panel); border: 3px dashed var(--accent); border-radius: var(--radius); padding: 48px 64px; text-align: center; }
-.dz-icon { font-size: 40px; }
-.drop-overlay-box p { margin: 8px 0 0; }
+#dropOverlay { position: fixed; inset: 0; background: rgba(8, 12, 24, .58); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 20px; pointer-events: none; }
+.drop-overlay-box {
+  background: var(--glass-strong); border: 2px dashed var(--accent);
+  border-radius: var(--radius); padding: 44px 60px; text-align: center; box-shadow: var(--shadow-lg);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .drop-overlay-box { -webkit-backdrop-filter: blur(18px) saturate(1.7); backdrop-filter: blur(18px) saturate(1.7); }
+}
+.dz-icon { display: flex; justify-content: center; color: var(--accent); }
+.dz-icon .ic { width: 42px; height: 42px; stroke-width: 1.5; }
+.drop-overlay-box p { margin: 10px 0 0; }
 .dz-hint { font-size: 12px; color: var(--muted); }
 .gallery-hint { font-size: 12px; color: var(--muted); margin: -4px 0 10px; }
 
 .urlbar { display: flex; gap: 8px; margin: 14px 0; }
 .urlbar input {
   flex: 1; border: 1px solid var(--border); background: var(--panel); color: var(--text);
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none;
+  border-radius: var(--radius-sm); padding: 9px 13px; font-size: 13px; font-family: inherit; outline: none;
+  transition: border-color .16s, box-shadow .16s;
 }
-.urlbar input:focus { border-color: var(--accent); }
+.urlbar input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 
 /* 上传队列 */
 .q-item {
   display: flex; gap: 12px; align-items: center; background: var(--panel);
   border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px;
+  box-shadow: var(--shadow-sm);
 }
 .q-item.done { border-color: var(--ok); }
 .q-item.error { border-color: var(--danger); }
-.q-thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+.q-thumb { width: 44px; height: 44px; border-radius: var(--radius-sm); object-fit: cover; background: var(--border); flex-shrink: 0; }
 .q-body { flex: 1; min-width: 0; }
 .q-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .q-bar { height: 4px; background: var(--border); border-radius: 2px; margin: 6px 0; overflow: hidden; }
-.q-fill { height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .2s; }
+.q-fill { height: 100%; width: 0; background: var(--grad); border-radius: 2px; transition: width .2s; }
 .q-status { font-size: 12px; color: var(--muted); }
 .q-item.error .q-status { color: var(--danger); cursor: pointer; }
 
 /* 区块标题 */
-.section-head { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 10px; }
-.section-head h2 { font-size: 15px; margin: 0; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 22px 0 10px; }
+.section-head h2 { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.section-head h2 .ic { width: 16px; height: 16px; color: var(--muted); }
 
 /* 上传结果 */
 .results { display: flex; flex-direction: column; gap: 8px; }
-.result { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; }
-.result img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+.result { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; box-shadow: var(--shadow-sm); }
+.result img { width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; background: var(--border); flex-shrink: 0; }
 .result-info { flex: 1; min-width: 0; }
 .result-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-btns { display: flex; gap: 6px; margin-top: 4px; }
 
 /* 历史 */
-.history { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 22px; padding: 4px 14px; }
-.history summary { cursor: pointer; padding: 10px 0; font-size: 14px; }
+.history { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 22px; padding: 4px 14px; box-shadow: var(--shadow-sm); }
+.history summary { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 11px 0; font-size: 14px; }
+.history summary .ic { width: 15px; height: 15px; color: var(--muted); }
 .history-toolbar { text-align: right; padding: 4px 0; }
 .history ul { list-style: none; margin: 0; padding: 0 0 10px; }
-.history li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.history li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .history li.empty { color: var(--muted); justify-content: center; }
 .h-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .h-time { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .h-btns { display: flex; gap: 4px; flex-shrink: 0; }
 
 /* 相册 */
-.gallery-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+/* 顶栏是 sticky 且空贴 .wrap 顶部，管理视图下工具栏是首个可见元素，给它留出上边距 */
+.gallery-toolbar { display: flex; align-items: center; gap: 8px; margin: 16px 0 12px; flex-wrap: wrap; }
 .gallery-toolbar .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
 .gallery-spacer { flex: 1; }
-.gallery-path { font-size: 13px; color: var(--muted); display: inline-flex; gap: 2px; align-items: center; }
-.gallery-path .crumb { border: none; background: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0 2px; }
-#selectModeBtn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#selectModeBtn.active { background: var(--grad); border-color: transparent; color: #fff; }
 #galleryCount { color: var(--muted); font-size: 12px; }
 
-.bulk-bar { position: sticky; top: 58px; z-index: 5; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
-#bulkCount { font-size: 13px; }
+.bulk-bar {
+  position: sticky; top: calc(var(--appbar-h) + 58px); z-index: 5;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--glass-strong); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px;
+  box-shadow: var(--shadow-md);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .bulk-bar { -webkit-backdrop-filter: blur(14px) saturate(1.7); backdrop-filter: blur(14px) saturate(1.7); }
+}
+#bulkCount { font-size: 13px; color: var(--muted); }
 
 .folder-tile { cursor: pointer; }
-.folder-tile .folder-icon { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 54px; background: linear-gradient(135deg, var(--accent-soft), transparent); }
-.folder-tile .folder-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; z-index: 2; }
-.folder-tile:hover .folder-actions { opacity: 1; }
-.folder-tile .folder-actions button { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); }
+.folder-tile .folder-icon {
+  width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--accent-soft), transparent 70%);
+  transition: transform .16s;
+}
+.folder-tile .folder-icon .ic { width: 46px; height: 46px; stroke-width: 1.4; color: var(--accent); opacity: .85; }
+.folder-tile:hover .folder-icon .ic { opacity: 1; }
+.folder-tile .folder-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .14s; z-index: 2; }
+.folder-tile:hover .folder-actions, .folder-tile:focus-within .folder-actions { opacity: 1; }
+.folder-tile .folder-actions button {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  border-radius: 7px; cursor: pointer; padding: 0; box-shadow: var(--shadow-sm);
+}
+.folder-tile .folder-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.folder-tile .folder-actions .ic { width: 14px; height: 14px; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-.gallery-meta { font-size: 12px; color: var(--muted); margin: -4px 0 10px; min-height: 18px; }
-.gallery-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13px; padding: 28px 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+/* 固定高度：加载中的转圈与「已显示 N 张」共用这一行。
+   高度写死 + 两者互斥显示，切换时行高不变，下面的网格顶边才不会跳动。 */
+.gallery-meta {
+  display: flex; align-items: center; gap: 7px;
+  height: 20px; margin: -4px 0 10px;
+  font-size: 12px; line-height: 1; color: var(--muted);
+}
+.gallery-meta .spin { width: 13px; height: 13px; }
+.gallery-busy { display: inline-flex; align-items: center; gap: 7px; }
+.gallery-empty {
+  grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center; color: var(--muted); font-size: 13px; padding: 46px 16px; line-height: 1.7;
+}
+.gallery-empty .ic { width: 30px; height: 30px; stroke-width: 1.4; opacity: .45; }
 /* 图片卡片上的公开切换按钮 */
-.grid figure .pub-toggle { position: absolute; top: 6px; right: 6px; z-index: 2; border: 1px solid var(--border); background: var(--panel); border-radius: 6px; cursor: pointer; font-size: 13px; padding: 2px 7px; box-shadow: var(--shadow); opacity: 0; transition: opacity .12s; }
-.grid figure:hover .pub-toggle { opacity: 1; }
+.grid figure .pub-toggle {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: grid; place-items: center; width: 27px; height: 27px;
+  border: 1px solid var(--border); background: var(--glass-strong); color: var(--text);
+  border-radius: 8px; cursor: pointer; padding: 0;
+  box-shadow: var(--shadow-sm); opacity: 0; transition: opacity .14s, color .14s, border-color .14s;
+}
+.grid figure:hover .pub-toggle, .grid figure:focus-within .pub-toggle { opacity: 1; }
 /* 公开状态由文件名前的 pub 徽标表达，按钮只在悬停时出现；.on 仅保留高亮样式 */
-.grid figure .pub-toggle.on { border-color: var(--accent); background: var(--accent-soft); }
+.grid figure .pub-toggle.on { border-color: transparent; background: var(--grad); color: #fff; }
 .grid figure .pub-toggle:disabled { opacity: .5; cursor: not-allowed; }
-.grid figure { position: relative; margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: zoom-in; transition: transform .12s, box-shadow .12s; }
-.grid figure:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-.grid figure.selected { outline: 2px solid var(--accent); }
+.grid figure .pub-toggle .ic { width: 15px; height: 15px; }
+.grid figure {
+  position: relative; margin: 0; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; cursor: zoom-in;
+  box-shadow: var(--shadow-sm);
+  transition: transform .16s, box-shadow .16s, border-color .16s;
+}
+.grid figure:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
+.grid figure.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
 .grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--border); }
-.grid figcaption { font-size: 12px; color: var(--muted); padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sel-check { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; border-radius: 50%; background: var(--panel); border: 2px solid var(--border); z-index: 2; }
-.grid figure.selected .sel-check { background: var(--accent); border-color: var(--accent); }
-.grid figure.selected .sel-check::after { content: '✓'; color: #fff; font-size: 11px; position: absolute; top: -1px; left: 2px; }
+.grid figcaption { display: flex; align-items: center; font-size: 12px; color: var(--muted); padding: 6px 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-check {
+  position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--glass-strong); border: 1.5px solid var(--border-strong); z-index: 2;
+  display: grid; place-items: center; color: transparent; transition: background .14s, border-color .14s, color .14s;
+}
+.sel-check .ic { width: 12px; height: 12px; stroke-width: 2.5; }
+.grid figure.selected .sel-check { background: var(--grad); border-color: transparent; color: #fff; }
 .grid figure.selectable { cursor: pointer; }
 /* 文件名前的公开状态徽标 */
-.pub-badge { display: inline-block; font-size: 10px; font-weight: 600; line-height: 1.4; color: #fff; background: var(--ok); border-radius: 8px; padding: 0 5px; margin-right: 4px; vertical-align: 1px; }
+.pub-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; line-height: 1.5; color: #fff; background: var(--ok); border-radius: 7px; padding: 0 6px; margin-right: 5px; flex: none; }
 /* 多选模式下的拖动框选 */
-#marquee { position: fixed; z-index: 65; border: 1px solid var(--accent); background: var(--accent-soft); pointer-events: none; }
+#marquee { position: fixed; z-index: 65; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 4px; pointer-events: none; }
 body.marqueeing { user-select: none; -webkit-user-select: none; }
 body.marqueeing .grid figure { cursor: default; transform: none; }
 /* 右键菜单 */
-#ctxMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 5px; min-width: 176px; }
-#ctxMenu button { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--text); font-size: 13px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+#ctxMenu {
+  position: fixed; z-index: 90; background: var(--glass-strong); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-lg); padding: 5px; min-width: 186px;
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  #ctxMenu { -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7); }
+}
+#ctxMenu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: none; background: none; color: var(--text); font-size: 13px; font-family: inherit;
+  padding: 7px 10px; border-radius: 7px; cursor: pointer;
+}
+#ctxMenu button .ic { width: 15px; height: 15px; color: var(--muted); }
 #ctxMenu button:hover { background: var(--accent-soft); color: var(--accent); }
+#ctxMenu button:hover .ic { color: var(--accent); }
 #ctxMenu button.danger { color: var(--danger); }
+#ctxMenu button.danger .ic { color: var(--danger); }
+#ctxMenu button.danger:hover { background: var(--danger-soft); }
 #ctxMenu .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
-.gallery-more { text-align: center; margin-top: 14px; }
+.gallery-more { text-align: center; margin-top: 16px; }
 
 /* 设置弹窗 */
 /* z-index 70：必须盖过灯箱（60），灯箱里点删除弹出的确认框才可见 */
-.dialog { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 16px; }
-.dialog-box { background: var(--panel); border-radius: var(--radius); padding: 20px 22px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
-.dialog-box h2 { margin: 0 0 14px; font-size: 16px; }
+.dialog { position: fixed; inset: 0; background: rgba(8, 12, 24, .48); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 16px; }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .dialog { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+}
+.dialog-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+  padding: 22px 24px; width: 100%; max-width: 420px; box-shadow: var(--shadow-lg);
+}
+.dialog-box h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.dialog-box h2 .ic { width: 18px; height: 18px; color: var(--accent); }
 .dialog-box p { margin: 0 0 14px; color: var(--muted); word-break: break-all; }
 .dup-preview { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
 .dup-side { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-.dup-side img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--border); }
-.dup-arrow { font-size: 18px; color: var(--muted); }
-.dup-compare { font-size: 12px; font-weight: 600; }
+.dup-side img { width: 110px; height: 110px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--border); }
+.dup-arrow { display: flex; color: var(--muted); }
+.dup-arrow .ic { width: 18px; height: 18px; }
+.dup-compare { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.dup-compare .ic { width: 14px; height: 14px; stroke-width: 2.2; }
 .dup-compare.same { color: var(--ok); }
 .dup-compare.diff { color: var(--danger); }
 .dup-apply { margin: 0 0 12px; }
 .field { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
 .field .req { color: var(--danger); }
 .field input, .field select {
-  width: 100%; margin-top: 4px; border: 1px solid var(--border); background: var(--bg);
-  color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; outline: none;
+  width: 100%; margin-top: 4px; border: 1px solid var(--border); background: var(--panel);
+  color: var(--text); border-radius: var(--radius-sm); padding: 9px 11px;
+  font-size: 13px; font-family: inherit; outline: none;
+  transition: border-color .16s, box-shadow .16s;
 }
-.field input:focus, .field select:focus { border-color: var(--accent); }
+.field input:focus, .field select:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .field .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.btn.danger-solid { background: var(--danger); border-color: transparent; color: #fff; }
 .btn.danger-solid:hover { filter: brightness(1.1); }
 
 /* 目录树（弹窗内选相册） */
-.tree { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin-top: 6px; background: var(--bg); }
+.tree { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; margin-top: 6px; background: var(--bg); }
 .tree ul { list-style: none; margin: 0; padding-left: 14px; }
 .tree > ul { padding-left: 0; }
 .tree-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
 .tree-row { display: flex; align-items: center; }
-.tree-caret { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 9px; padding: 3px 4px; line-height: 1; transition: transform .12s; }
+.tree-caret { display: grid; place-items: center; border: none; background: none; color: var(--muted); cursor: pointer; padding: 3px; line-height: 1; transition: transform .14s; }
+.tree-caret .ic { width: 12px; height: 12px; }
 .tree-caret.open { transform: rotate(90deg); }
 .tree-caret.leaf { visibility: hidden; cursor: default; }
-.tree-label { border: none; background: none; color: var(--text); cursor: pointer; font-size: 13px; padding: 3px 6px; border-radius: 6px; text-align: left; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-label {
+  display: flex; align-items: center; gap: 7px;
+  border: none; background: none; color: var(--text); cursor: pointer; font-size: 13px; font-family: inherit;
+  padding: 4px 7px; border-radius: 7px; text-align: left; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tree-label .ic { width: 14px; height: 14px; color: var(--muted); }
 .tree-label:hover { background: var(--accent-soft); color: var(--accent); }
+.tree-label:hover .ic { color: var(--accent); }
 
 /* 灯箱 */
-.lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .75); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
+.lightbox { position: fixed; inset: 0; background: rgba(6, 9, 18, .80); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .lightbox { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+}
 .lightbox-box { position: relative; max-width: min(920px, 94vw); max-height: 92vh; display: flex; flex-direction: column; gap: 10px; }
-.lightbox img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: var(--radius); background: #000; }
-.lightbox-close { position: absolute; top: -12px; right: -12px; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; font-size: 15px; }
+.lightbox img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: var(--radius); background: rgba(0, 0, 0, .35); }
+.lightbox-close {
+  position: absolute; top: -14px; right: -14px; width: 36px; height: 36px;
+  display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer;
+  box-shadow: var(--shadow-md); transition: border-color .16s, color .16s;
+}
+.lightbox-close:hover { border-color: var(--accent); color: var(--accent); }
+.lightbox-close .ic { width: 16px; height: 16px; }
 .lightbox-info { display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .lightbox-name { font-size: 12px; color: #cbd5e1; word-break: break-all; text-align: center; }
-.lightbox-actions { display: flex; gap: 8px; }
+.lightbox-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.lightbox-actions .btn { background: rgba(255, 255, 255, .10); border-color: rgba(255, 255, 255, .18); color: #eef1f7; box-shadow: none; }
+.lightbox-actions .btn:hover { background: rgba(255, 255, 255, .18); border-color: rgba(255, 255, 255, .3); }
+.lightbox-actions .btn.on { background: rgba(255, 255, 255, .24); border-color: rgba(255, 255, 255, .38); color: #fff; }
+.lightbox-actions .btn.danger { color: #fca5a5; }
+.lightbox-actions .btn.danger:hover { background: rgba(248, 113, 113, .18); border-color: rgba(248, 113, 113, .4); }
 
 /* Toast */
 #toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
-  background: var(--text); color: var(--bg); padding: 9px 18px; border-radius: 20px;
-  font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 80; max-width: 90vw;
+  background: var(--glass-strong); color: var(--text); padding: 10px 20px;
+  border: 1px solid var(--border); border-radius: 22px;
+  font-size: 13px; opacity: 0; pointer-events: none;
+  box-shadow: var(--shadow-lg); transition: opacity .25s, transform .25s; z-index: 80; max-width: 90vw;
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  #toast { -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7); }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-#toast.error { background: var(--danger); color: #fff; }
+#toast.error { background: var(--danger); border-color: transparent; color: #fff; }
 
 /* 上传状态悬浮按钮 + 面板 */
 .upload-fab {
   position: fixed; right: 20px; bottom: 24px; z-index: 40;
-  width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--accent);
-  background: var(--accent); color: #fff; font-size: 20px; cursor: pointer;
-  box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center;
-  transition: transform .12s, background .15s, border-color .15s;
+  width: 54px; height: 54px; border-radius: 50%; border: 1px solid transparent;
+  background: var(--grad); color: #fff; cursor: pointer;
+  box-shadow: 0 8px 22px rgba(59, 130, 246, .38);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .14s, box-shadow .16s;
 }
-.upload-fab:hover { transform: translateY(-2px); }
-.upload-fab.idle { background: var(--panel); color: var(--text); border-color: var(--border); }
+.upload-fab .ic { width: 22px; height: 22px; }
+.upload-fab:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(59, 130, 246, .46); }
+.upload-fab.idle { background: var(--glass-strong); color: var(--text); border-color: var(--border); box-shadow: var(--shadow-md); }
 .fab-badge {
   position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px;
   border-radius: 10px; background: var(--danger); color: #fff; font-size: 11px; line-height: 20px;
@@ -267,48 +486,144 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .fab-badge.idle { display: none; }
 #panelBackdrop { position: fixed; inset: 0; z-index: 39; background: transparent; }
 .upload-panel {
-  position: fixed; right: 16px; bottom: 88px; z-index: 40;
+  position: fixed; right: 16px; bottom: 92px; z-index: 40;
   width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 640px); overflow-y: auto;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 12px 14px;
+  background: var(--glass-strong); border: 1px solid var(--border);
+  border-radius: 18px; box-shadow: var(--shadow-lg); padding: 14px 16px;
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .upload-panel { -webkit-backdrop-filter: blur(20px) saturate(1.7); backdrop-filter: blur(20px) saturate(1.7); }
 }
 .panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.panel-head h2 { margin: 0; font-size: 15px; }
+.panel-head h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 15px; font-weight: 650; }
+.panel-head h2 .ic { width: 16px; height: 16px; color: var(--accent); }
 .panel-badge { font-size: 12px; color: var(--muted); }
-.panel-close { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 7px; border-radius: 6px; }
+.panel-close { display: grid; place-items: center; border: none; background: none; color: var(--muted); cursor: pointer; padding: 5px; border-radius: 7px; }
+.panel-close .ic { width: 15px; height: 15px; }
 .panel-close:hover { background: var(--accent-soft); color: var(--text); }
-.upload-panel .history { margin-top: 14px; }
+.upload-panel .history { margin-top: 14px; background: transparent; border: none; box-shadow: none; padding: 0; }
 .upload-panel .section-head { margin: 14px 0 8px; }
 .upload-panel .section-head h2 { font-size: 14px; }
 .upload-panel:empty { display: none; }
+
+/* ---------- 加载指示 ---------- */
+/* 顶部不定长进度条：<body> 直接子元素，用 transform 走合成层 */
+.page-progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100;
+  overflow: hidden; pointer-events: none; opacity: 0; transition: opacity .2s;
+}
+.page-progress.on { opacity: 1; }
+.page-progress i {
+  display: block; width: 40%; height: 100%; border-radius: 0 3px 3px 0;
+  background: var(--grad); transform: translateX(-100%);
+  animation: pb-slide 1.15s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+@keyframes pb-slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+
+/* 转圈：用在 .gallery-meta 与「加载更多」按钮里 */
+.spin {
+  width: 16px; height: 16px; flex: none; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+.btn .spin { width: 13px; height: 13px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 骨架卡片：刻意用 div 而非 figure —— 多选/框选/公开徽标都会扫 #galleryGrid figure */
+.sk-tile { border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border); overflow: hidden; }
+.sk-tile .sk-img { aspect-ratio: 1; }
+.sk-tile .sk-cap { height: 10px; margin: 10px 9px; border-radius: 5px; }
+.sk-tile .sk-img, .sk-tile .sk-cap {
+  background: linear-gradient(100deg, var(--border) 30%, var(--accent-soft) 50%, var(--border) 70%);
+  background-size: 220% 100%; animation: shimmer 1.3s linear infinite;
+}
+
+/* 缩略图骨架：挂在 figure 上而非 img（img 是替换元素，不渲染 ::before） */
+.grid figure img { transition: opacity .3s ease; }
+.grid figure.ph img { opacity: 0; }
+.grid figure.ph::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; aspect-ratio: 1; z-index: 1;
+  background: linear-gradient(100deg, var(--border) 30%, var(--accent-soft) 50%, var(--border) 70%);
+  background-size: 220% 100%; animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .page-progress i { width: 100%; transform: none; animation: none; background: var(--grad); }
+  .sk-tile .sk-img, .sk-tile .sk-cap, .grid figure.ph::before { background-image: none; background-color: var(--border); }
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
+<!-- 顶部进度条：body 的直接子元素，避免被 .wrap 的 max-width 内缩 -->
+<div id="progressBar" class="page-progress" hidden><i></i></div>
+
+<!-- 图标 sprite：统一 24 网格、1.75 描边、currentColor 上色 -->
+<svg class="icon-sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="8.6" cy="8.6" r="1.9"/><path d="M2.5 18.2l4.9-4.9a2 2 0 0 1 2.83 0l3.1 3.1 1.7-1.7a2 2 0 0 1 2.83 0l3.64 3.64V19a2 2 0 0 1-2 2H4.5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h9M18.5 8H20M4 16h4M13.5 16H20"/><circle cx="16" cy="8" r="2.5"/><circle cx="10.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/><path d="M12 10.5v6M9 13.5h6"/></symbol>
+  <symbol id="i-folder-upload" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></symbol>
+  <symbol id="i-folder-move" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/><path d="M9.5 13.5h5.5M12.5 11l2.5 2.5-2.5 2.5"/></symbol>
+  <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M8.5 12.2l2.6 2.6 4.6-5.6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6.5L9.5 17 4 11.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 11.5a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 3.5v6h-6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3.5a2.83 2.83 0 1 1 4 4L7.5 21 2 22.5 3.5 17z"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><path d="M4 12h12M12.5 8l3.5 4-3.5 4"/><path d="M20 6v12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3.5 6h17"/><path d="M8.5 6V4.5A1.5 1.5 0 0 1 10 3h4a1.5 1.5 0 0 1 1.5 1.5V6"/><path d="M18.5 6l-.85 13.06a2 2 0 0 1-2 1.94H8.35a2 2 0 0 1-2-1.94L5.5 6"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16.2 16.2"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 6.5l1.2-1.2a4.5 4.5 0 0 1 6.4 6.4l-1.2 1.2"/><path d="M13.5 17.5l-1.2 1.2a4.5 4.5 0 0 1-6.4-6.4l1.2-1.2"/><path d="M9.5 14.5l5-5"/></symbol>
+  <symbol id="i-md" viewBox="0 0 24 24"><path d="M14 2.5H6.5A2.5 2.5 0 0 0 4 5v14a2.5 2.5 0 0 0 2.5 2.5h11A2.5 2.5 0 0 0 20 19V8.5z"/><path d="M14 2.5V8.5H20"/><path d="M8 13.5h8M8 17h5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 17.5l-5.5-5.5L9 6.5"/><path d="M15 6.5l5.5 5.5L15 17.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5V12l3.5 2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5.5l6.5 6.5L9 18.5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M20.5 15.5l-4-4-9.5 9.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.3"/></symbol>
+</svg>
+
+<header class="appbar">
+  <div class="appbar-inner">
     <div class="brand">
-      <span class="logo">🖼️</span>
+      <span class="logo"><svg class="ic ic-solid"><use href="#i-logo"/></svg></span>
       <div>
         <h1>PicBed 图床</h1>
         <p id="bucketInfo"></p>
       </div>
     </div>
+    <span class="appbar-spacer"></span>
     <nav id="viewTabs" class="tabs">
-      <button id="tabPublic">🌍 公开画廊</button>
-      <button id="tabAdmin">🔒 我的相册</button>
+      <button id="tabPublic"><svg class="ic"><use href="#i-globe"/></svg>公开画廊</button>
+      <button id="tabAdmin"><svg class="ic"><use href="#i-lock"/></svg>我的相册</button>
     </nav>
-    <button id="settingsBtn" class="btn ghost admin-only">⚙️ 设置</button>
-  </header>
+    <!-- 访客可见：指向源码仓库 -->
+    <a id="repoLink" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>
+      <svg class="ic ic-solid"><use href="#i-github"/></svg><span class="lbl">GitHub</span>
+    </a>
+    <button id="settingsBtn" class="btn ghost admin-only">
+      <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
+    </button>
+  </div>
+</header>
+<div class="wrap">
 
   <input type="file" id="fileInput" accept="image/*" multiple hidden>
   <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
 
   <div class="gallery-toolbar admin-only">
-    <button id="uploadBtn" class="btn primary">⬆️ 上传到当前目录</button>
-    <button id="uploadDirBtn" class="btn">📂 上传文件夹</button>
-    <button id="newAlbumBtn" class="btn">📁 新建相册</button>
-    <button id="selectModeBtn" class="btn">☑️ 多选</button>
-    <button id="refreshGallery" class="btn">🔄 刷新</button>
+    <button id="uploadBtn" class="btn primary"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">上传到当前目录</span></button>
+    <button id="uploadDirBtn" class="btn"><svg class="ic"><use href="#i-folder-upload"/></svg><span class="lbl">上传文件夹</span></button>
+    <button id="newAlbumBtn" class="btn"><svg class="ic"><use href="#i-folder-plus"/></svg><span class="lbl">新建相册</span></button>
+    <button id="selectModeBtn" class="btn"><svg class="ic"><use href="#i-check-square"/></svg><span class="lbl">多选</span></button>
+    <button id="refreshGallery" class="btn"><svg class="ic"><use href="#i-refresh"/></svg><span class="lbl">刷新</span></button>
     <span class="gallery-spacer"></span>
     <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
   </div>
@@ -316,28 +631,32 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
-    <button id="urlBtn" class="btn">转存</button>
+    <button id="urlBtn" class="btn"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">转存</span></button>
   </div>
 
   <div id="bulkBar" class="bulk-bar admin-only" hidden>
     <button id="bulkSelectAllBtn" class="btn small">全选</button>
     <button id="bulkInvertBtn" class="btn small">反选</button>
     <span id="bulkCount"></span>
-    <button id="bulkMoveBtn" class="btn small">📦 移动到相册</button>
-    <button id="bulkPublicBtn" class="btn small">🌍 设为公开</button>
-    <button id="bulkDeleteBtn" class="btn small danger">批量删除</button>
+    <span class="gallery-spacer"></span>
+    <button id="bulkMoveBtn" class="btn small"><svg class="ic"><use href="#i-move"/></svg><span class="lbl">移动到相册</span></button>
+    <button id="bulkPublicBtn" class="btn small"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">设为公开</span></button>
+    <button id="bulkDeleteBtn" class="btn small danger"><svg class="ic"><use href="#i-trash"/></svg><span class="lbl">批量删除</span></button>
     <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
   </div>
 
   <div id="galleryPath" class="gallery-path"></div>
-  <div class="gallery-meta"><span id="galleryCount"></span></div>
+  <div class="gallery-meta">
+    <span id="galleryCount"></span>
+    <span id="galleryBusy" class="gallery-busy" role="status" hidden><span class="spin"></span><span id="galleryBusyText"></span></span>
+  </div>
 
   <div id="galleryGrid" class="grid"></div>
-  <div class="gallery-more"><button id="loadMore" class="btn" hidden>加载更多</button></div>
+  <div class="gallery-more"><button id="loadMore" class="btn" hidden><span class="spin" hidden></span><span class="lbl">加载更多</span></button></div>
 
   <div id="dropOverlay" hidden>
     <div class="drop-overlay-box">
-      <div class="dz-icon">⬆️</div>
+      <div class="dz-icon"><svg class="ic"><use href="#i-upload"/></svg></div>
       <p id="dropTargetLabel">松开鼠标，上传到当前目录</p>
       <p class="dz-hint">支持整个文件夹（自动递归、仅图片）· 支持批量 · Ctrl+V 粘贴也可以</p>
     </div>
@@ -347,33 +666,33 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 <div id="panelBackdrop" class="admin-only" hidden></div>
 <div id="uploadPanel" class="upload-panel admin-only" hidden>
   <div class="panel-head">
-    <h2>⬆️ 上传</h2>
+    <h2><svg class="ic"><use href="#i-upload"/></svg>上传</h2>
     <span id="panelBadge" class="panel-badge"></span>
     <span class="gallery-spacer"></span>
-    <button id="panelClose" class="panel-close" title="收起">✕</button>
+    <button id="panelClose" class="panel-close" title="收起"><svg class="ic"><use href="#i-x"/></svg></button>
   </div>
   <div id="queue"></div>
   <div id="resultsSection" hidden>
     <div class="section-head">
-      <h2>本次上传</h2>
-      <button id="copyAllBtn" class="btn small">复制全部（当前格式）</button>
+      <h2><svg class="ic"><use href="#i-check"/></svg>本次上传</h2>
+      <button id="copyAllBtn" class="btn small"><svg class="ic"><use href="#i-copy"/></svg><span class="lbl">复制全部（当前格式）</span></button>
     </div>
     <div id="results" class="results"></div>
   </div>
   <details id="historyBox" class="history">
-    <summary>📋 上传历史（仅存本机浏览器）</summary>
+    <summary><svg class="ic"><use href="#i-clock"/></svg>上传历史（仅存本机浏览器）</summary>
     <div class="history-toolbar"><button id="clearHistory" class="btn small danger">清空记录</button></div>
     <ul id="historyList"></ul>
   </details>
 </div>
 <button id="uploadFab" class="upload-fab idle admin-only" title="上传状态" hidden>
-  <span>⬆️</span>
+  <svg class="ic"><use href="#i-upload"/></svg>
   <span id="fabBadge" class="fab-badge idle"></span>
 </button>
 
 <div id="settingsDialog" class="dialog" hidden>
   <div class="dialog-box">
-    <h2>⚙️ 设置</h2>
+    <h2><svg class="ic"><use href="#i-sliders"/></svg>设置</h2>
     <label class="field">Worker 地址 <span class="req">*</span>
       <input id="setWorker" type="text" placeholder="https://picbed-worker.xxx.workers.dev">
     </label>
@@ -403,13 +722,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
 <div id="dupDialog" class="dialog" hidden>
   <div class="dialog-box">
-    <h2>⚠️ 文件冲突</h2>
+    <h2><svg class="ic"><use href="#i-alert"/></svg>文件冲突</h2>
     <div id="dupPreview" class="dup-preview" hidden>
       <div class="dup-side">
         <img id="dupNewImg" alt="新文件">
         <span>新文件（待上传）</span>
       </div>
-      <span class="dup-arrow">→</span>
+      <span class="dup-arrow"><svg class="ic"><use href="#i-move"/></svg></span>
       <div class="dup-side">
         <img id="dupOldImg" alt="现有文件">
         <span>现有文件</span>
@@ -457,16 +776,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
 <div id="lightbox" class="lightbox" hidden>
   <div class="lightbox-box">
-    <button id="lightboxClose" class="lightbox-close" title="关闭">✕</button>
+    <button id="lightboxClose" class="lightbox-close" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
     <img id="lightboxImg" alt="">
     <div class="lightbox-info">
       <div id="lightboxName" class="lightbox-name"></div>
       <div class="lightbox-actions">
-        <button class="btn small" data-fmt="url">URL</button>
-        <button class="btn small" data-fmt="markdown">Markdown</button>
-        <button class="btn small" data-fmt="html">HTML</button>
-        <button class="btn small" id="togglePublicBtn">🌍 设为公开</button>
-        <button class="btn small danger" id="deleteBtn">删除</button>
+        <button class="btn small" data-fmt="url"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">URL</span></button>
+        <button class="btn small" data-fmt="markdown"><svg class="ic"><use href="#i-md"/></svg><span class="lbl">Markdown</span></button>
+        <button class="btn small" data-fmt="html"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">HTML</span></button>
+        <button class="btn small" id="togglePublicBtn"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">设为公开</span></button>
+        <button class="btn small danger" id="deleteBtn"><svg class="ic"><use href="#i-trash"/></svg><span class="lbl">删除</span></button>
       </div>
     </div>
   </div>
@@ -487,6 +806,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     worker: '', bucket: 'album-1255316209', region: 'ap-shanghai',
     prefix: 'img', customDomain: '', maxKeys: 500,
     format: 'url', password: '', thumb: false,
+    repo: '', // 源码仓库地址，填了就在顶栏给访客显示 GitHub 入口
   };
   let cfg = Object.assign({}, DEFAULTS, window.PICBED_CONFIG || {});
   const STORE_KEY = 'picbed_settings';
@@ -504,6 +824,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const FMT = ['url', 'markdown', 'html'];
   const FMT_LABEL = { url: 'URL', markdown: 'MD', html: 'HTML' };
+  const FMT_ICON = { url: 'link', markdown: 'md', html: 'code' };
   const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico'];
   const TYPE_BY_EXT = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -516,6 +837,109 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     el.className = 'show' + (isError ? ' error' : '');
     clearTimeout(toast._t);
     toast._t = setTimeout(() => { el.className = ''; }, 2600);
+  }
+
+  // ---------- 图标 ----------
+  // 引用 sprite 里的 <symbol>；viewBox 写在 symbol 上，外层 svg 不用再写
+  function icon(name, cls) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', cls ? 'ic ' + cls : 'ic');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + name);
+    svg.appendChild(use);
+    return svg;
+  }
+
+  // 只换 <use href>，不动按钮上的文案节点（textContent 会连图标一起抹掉）
+  function setIcon(el, name) {
+    const use = el && el.querySelector('use');
+    if (use) use.setAttribute('href', '#i-' + name);
+  }
+
+  // 改按钮文案：文案必须放在 .lbl 里，否则会把按钮内的图标一起抹掉
+  function setLabel(el, text) {
+    const lbl = el && el.querySelector('.lbl');
+    if (lbl) lbl.textContent = text;
+    else if (el) el.textContent = text;
+  }
+
+  // ---------- 加载指示：顶部进度条 + 网格骨架 ----------
+  // 进度条走引用计数而不是 show/hide 配对：管理视图的 loadGallery 与 loadPublicMarkers
+  // 是并发的，谁先返回谁先结束，配对的写法会让进度条在另一个还在请求时就消失。
+  let busyCount = 0;
+  let barShowTimer = 0;
+  let barHideTimer = 0;
+
+  function progressBar(show) {
+    const bar = $('progressBar');
+    if (!bar) return;
+    // 必须先清掉显示定时器：否则「延迟 120ms 才亮」的它会在加载结束后才点亮进度条，再没人关
+    clearTimeout(barShowTimer);
+    clearTimeout(barHideTimer);
+    if (!show) {
+      bar.classList.remove('on');
+      barHideTimer = setTimeout(() => { bar.hidden = true; }, 220); // 等淡出走完再 display:none
+      return;
+    }
+    if (!bar.hidden) { bar.classList.add('on'); return; } // 已在显示，直接续上，不再等 120ms
+    barShowTimer = setTimeout(() => { bar.hidden = false; bar.classList.add('on'); }, 120);
+  }
+
+  // 开始一次加载，返回幂等的 release()：catch 与 finally 里都调也不会把计数减穿
+  function beginLoad() {
+    busyCount++;
+    if (busyCount === 1) progressBar(true);
+    let released = false;
+    return function release() {
+      if (released) return; // 减两次会让计数永远回不到 0，进度条从此不再出现
+      released = true;
+      busyCount = Math.max(0, busyCount - 1);
+      if (busyCount === 0) progressBar(false);
+    };
+  }
+
+  // 加载态分两处表达：
+  //   · 转圈 + 文案走 .gallery-meta 那一行（网格上方，高度写死，切换时不推动网格）
+  //   · 骨架格子铺进网格，只在 reset 加载时铺
+  // 骨架必须是 <div> 而不是 <figure>：refreshPublicIndicators / 多选 / 框选都会扫
+  // #galleryGrid figure，混进 figure 会被当成真实图片。
+  const SK_TILES = 12;
+  let gridLoaderSeq = 0;
+  let gridLoaderOwner = 0;
+
+  function showGridLoader(opts) {
+    const o = opts || {};
+    const seq = ++gridLoaderSeq;
+    gridLoaderOwner = seq; // 最新一次的调用取得所有权
+    // 转圈与「已显示 N 张」共用同一行、互斥显示，行高不变
+    $('galleryBusyText').textContent = o.text || '加载中…';
+    $('galleryBusy').hidden = false;
+    $('galleryCount').hidden = true;
+    const grid = $('galleryGrid');
+    // 已经有骨架在屏幕上（上一次 reset 还没收尾）：沿用即可，不重复铺
+    if (o.skeleton && !grid.querySelector('.sk-tile')) {
+      for (let i = 0; i < SK_TILES; i++) {
+        const tile = document.createElement('div');
+        tile.className = 'sk-tile';
+        const im = document.createElement('div');
+        im.className = 'sk-img';
+        const cap = document.createElement('div');
+        cap.className = 'sk-cap';
+        tile.append(im, cap);
+        grid.appendChild(tile); // 只追加，永不清空网格
+      }
+    }
+    return seq;
+  }
+
+  // 只有「最新一次」加载有权收尾：先返回的旧请求不能把新请求的骨架撤掉，
+  // 否则点相册与点刷新两次 reset 重叠时会退回空白网格 —— 正是要修的那个问题。
+  function hideGridLoader(seq) {
+    if (!seq || seq !== gridLoaderOwner) return;
+    $('galleryBusy').hidden = true;
+    $('galleryCount').hidden = false;
+    // 最新的 owner 收尾时顺手清干净所有骨架块（含它继承来的上一轮残留）
+    $('galleryGrid').querySelectorAll('.sk-tile').forEach((el) => el.remove());
   }
 
   async function copyText(text) {
@@ -845,7 +1269,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     FMT.forEach((k) => {
       const b = document.createElement('button');
       b.className = 'btn small';
-      b.textContent = FMT_LABEL[k];
+      b.appendChild(icon(FMT_ICON[k]));
+      const lbl = document.createElement('span');
+      lbl.textContent = FMT_LABEL[k];
+      b.appendChild(lbl);
       b.onclick = () => copyText(links[k]);
       btns.appendChild(b);
     });
@@ -900,13 +1327,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       FMT.forEach((k) => {
         const b = document.createElement('button');
         b.className = 'btn small';
-        b.textContent = FMT_LABEL[k];
+        b.appendChild(icon(FMT_ICON[k]));
+        const lbl = document.createElement('span');
+        lbl.textContent = FMT_LABEL[k];
+        b.appendChild(lbl);
         b.onclick = () => copyText(links[k]);
         btns.appendChild(b);
       });
       const del = document.createElement('button');
       del.className = 'btn small danger';
-      del.textContent = '✕';
+      del.appendChild(icon('x'));
       del.title = '删除记录';
       del.onclick = () => { history = history.filter((x) => x !== h); persistHistory(); renderHistory(); };
       btns.appendChild(del);
@@ -1093,19 +1523,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         $('dupOldImg').src = publicUrl(opts.oldKey);
         compareFiles(opts.file, opts.oldKey).then((r) => {
           const el = $('dupCompare');
-          if (r === 'same') {
-            el.textContent = '✓ 两个文件内容完全一致';
-            el.className = 'dup-compare same';
-          } else if (r === 'diff') {
-            el.textContent = '✗ 两个文件内容不同（覆盖会替换现有文件）';
-            el.className = 'dup-compare diff';
-          } else if (r === 'size-same') {
-            el.textContent = '大小一致，但无法完成内容比对';
-            el.className = 'dup-compare';
-          } else {
+          const show = (cls, ic, text) => {
             el.textContent = '';
-            el.className = 'dup-compare';
-          }
+            el.className = 'dup-compare' + (cls ? ' ' + cls : '');
+            if (ic) el.appendChild(icon(ic));
+            if (text) el.appendChild(document.createTextNode(text));
+          };
+          if (r === 'same') show('same', 'check', '两个文件内容完全一致');
+          else if (r === 'diff') show('diff', 'alert', '两个文件内容不同（覆盖会替换现有文件）');
+          else if (r === 'size-same') show('', null, '大小一致，但无法完成内容比对');
+          else show('', null, '');
         });
       } else {
         $('dupCompare').textContent = '';
@@ -1361,7 +1788,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const caret = document.createElement('button');
       caret.type = 'button';
       caret.className = 'tree-caret' + (k.children.size ? '' : ' leaf');
-      caret.textContent = '▶';
+      caret.appendChild(icon('chevron'));
       if (k.children.size) {
         caret.onclick = (e) => {
           e.stopPropagation();
@@ -1429,6 +1856,15 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     appendTreeLevel(albumTreeFromPaths(paths), box, onPick);
   }
 
+  // 「加载更多」按钮的加载态：转圈 + 文案，只改 .lbl，不碰按钮里的其它节点
+  function loadMoreState(loading) {
+    const btn = $('loadMore');
+    btn.disabled = loading;
+    const sp = btn.querySelector('.spin');
+    if (sp) sp.hidden = !loading;
+    setLabel(btn, loading ? '加载中…' : '加载更多');
+  }
+
   async function loadGallery(reset) {
     if (!needWorker()) return;
     if (reset) {
@@ -1437,9 +1873,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       $('galleryGrid').textContent = '';
       clearSelection();
     }
+    const release = beginLoad();
+    const gridSeq = showGridLoader(reset
+      ? { skeleton: true, text: '正在加载相册…' }
+      : { text: `正在加载更多…（已显示 ${galleryLoaded} 张）` });
     const btn = $('loadMore');
-    btn.disabled = true;
-    btn.textContent = '加载中…';
+    loadMoreState(true);
     try {
       const data = await getBucketP({
         Prefix: galleryPrefix,
@@ -1468,18 +1907,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       console.error('[picbed] 相册加载失败:', e.message || e);
       toast('相册加载失败：' + ((e && e.error && e.error.Message) || e.message || e), true);
     } finally {
-      btn.disabled = false;
-      btn.textContent = '加载更多';
+      hideGridLoader(gridSeq);
+      release();
+      loadMoreState(false);
     }
   }
 
   // ---------- 公开画廊（游客视图） ----------
-  function publicGridHint(msg) {
-    $('galleryGrid').textContent = '';
+  function publicGridHint(msg, iconName) {
+    const grid = $('galleryGrid');
+    grid.textContent = '';
     const div = document.createElement('div');
     div.className = 'gallery-empty';
-    div.textContent = msg;
-    $('galleryGrid').appendChild(div);
+    div.appendChild(icon(iconName || 'image'));
+    const span = document.createElement('span');
+    span.textContent = msg;
+    div.appendChild(span);
+    grid.appendChild(div);
   }
 
   async function loadPublicGallery(reset) {
@@ -1488,14 +1932,18 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       publicLoaded = 0;
       $('galleryGrid').textContent = '';
     }
+    // 离线访客不点亮任何加载指示：beginLoad 必须在这些提前返回之后
     if (!cfg.worker) {
       renderBreadcrumb();
-      publicGridHint('还没有配置图片服务地址，无法加载公开画廊。');
+      publicGridHint('还没有配置图片服务地址，无法加载公开画廊。', 'alert');
       return;
     }
+    const release = beginLoad();
+    const gridSeq = showGridLoader(reset
+      ? { skeleton: true, text: '正在加载公开画廊…' }
+      : { text: `正在加载更多…（已显示 ${publicLoaded} 张）` });
     const btn = $('loadMore');
-    btn.disabled = true;
-    btn.textContent = '加载中…';
+    loadMoreState(true);
     try {
       const q = new URLSearchParams();
       if (publicPrefix) q.set('prefix', publicPrefix);
@@ -1516,15 +1964,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       publicMarker = data.truncated && data.nextMarker ? data.nextMarker : '';
       btn.hidden = !publicMarker;
       if (reset && !publicMarker && !publicLoaded && !(data.folders || []).length) {
-        publicGridHint(publicPrefix ? '这个相册里还没有公开的图片。' : '还没有公开的图片。管理员可在「我的相册」里点图片右上角的 🌑 设为公开。');
+        publicGridHint(publicPrefix ? '这个相册里还没有公开的图片。' : '还没有公开的图片。管理员可在「我的相册」里点图片右上角的公开按钮设为公开。');
       }
     } catch (e) {
       console.error('[picbed] 公开画廊加载失败:', e.message || e);
-      if (reset) publicGridHint('公开画廊加载失败：' + (e.message || '无法连接服务') + '（若刚更新过页面，请确认 Worker 已重新部署）');
+      if (reset) publicGridHint('公开画廊加载失败：' + (e.message || '无法连接服务') + '（若刚更新过页面，请确认 Worker 已重新部署）', 'alert');
       toast('公开画廊加载失败：' + (e.message || e), true);
     } finally {
-      btn.disabled = false;
-      btn.textContent = '加载更多';
+      hideGridLoader(gridSeq);
+      release();
+      loadMoreState(false);
     }
   }
 
@@ -1532,12 +1981,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const name = relPrefix.replace(/\/+$/, '').split('/').pop() || relPrefix;
     const fig = document.createElement('figure');
     fig.className = 'folder-tile';
-    const icon = document.createElement('div');
-    icon.className = 'folder-icon';
-    icon.textContent = '📁';
+    const iconEl = document.createElement('div');
+    iconEl.className = 'folder-icon';
+    iconEl.appendChild(icon('folder'));
     const cap = document.createElement('figcaption');
     cap.textContent = name;
-    fig.append(icon, cap);
+    fig.append(iconEl, cap);
     fig.onclick = () => { publicPrefix = relPrefix; loadPublicGallery(true); };
     return fig;
   }
@@ -1547,24 +1996,31 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 必须带 flat=1：否则子相册里的标记会被折叠进 folders，公开状态读不全
   async function loadPublicMarkers() {
     if (!cfg.worker) return;
-    const next = new Set();
-    let marker = '';
-    for (;;) {
-      const q = new URLSearchParams();
-      q.set('flat', '1');
-      if (marker) q.set('marker', marker);
-      const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      for (const f of data.files || []) next.add(f.key);
-      if (data.truncated && data.nextMarker) marker = data.nextMarker;
-      else break;
+    const release = beginLoad();
+    // try/finally 必须在本函数内：调用点（switchView）的 .catch 在另一个函数里，
+    // 那边只弹 toast，请求抛错时计数永远收不回来 → 进度条永久卡住
+    try {
+      const next = new Set();
+      let marker = '';
+      for (;;) {
+        const q = new URLSearchParams();
+        q.set('flat', '1');
+        if (marker) q.set('marker', marker);
+        const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        for (const f of data.files || []) next.add(f.key);
+        if (data.truncated && data.nextMarker) marker = data.nextMarker;
+        else break;
+      }
+      publicKeys.clear();
+      next.forEach((k) => publicKeys.add(k));
+      publicKeysLoaded = true; // 完整走完一轮才标记为可信
+      refreshPublicIndicators();
+      updateBulkBar();
+    } finally {
+      release();
     }
-    publicKeys.clear();
-    next.forEach((k) => publicKeys.add(k));
-    publicKeysLoaded = true; // 完整走完一轮才标记为可信
-    refreshPublicIndicators();
-    updateBulkBar();
   }
 
   function refreshPublicIndicators() {
@@ -1572,7 +2028,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const on = publicKeys.has(pubRelOf(fig.dataset.key));
       const btn = fig.querySelector('.pub-toggle');
       if (btn) {
-        btn.textContent = on ? '🌍' : '🌑';
+        setIcon(btn, on ? 'globe' : 'moon');
         btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
         btn.classList.toggle('on', on);
       }
@@ -1801,10 +2257,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         loadGallery(true);
       }
     };
-    const crumb = (label, prefix, isCurrent) => {
+    const crumb = (label, prefix, isCurrent, iconName) => {
       const b = document.createElement('button');
       b.className = 'crumb' + (isCurrent ? ' current' : '');
-      b.textContent = label;
+      if (iconName) b.appendChild(icon(iconName));
+      b.appendChild(document.createTextNode(label));
       if (!isCurrent) b.onclick = () => go(prefix);
       if (!isPublic) makeDropTarget(b, () => prefix); // 可把图片/相册拖到上级目录
       el.appendChild(b);
@@ -1815,7 +2272,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       s.textContent = '/';
       el.appendChild(s);
     };
-    crumb(isPublic ? '🏠 公开画廊' : '🏠 全部', rootPrefix, relCurrent === '');
+    crumb(isPublic ? '公开画廊' : '全部', rootPrefix, relCurrent === '', isPublic ? 'globe' : 'folder');
     if (relCurrent) {
       let acc = rootPrefix;
       const parts = relCurrent.replace(/\/$/, '').split('/');
@@ -1907,39 +2364,39 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const name = prefix.slice(0, -1).split('/').pop() || prefix;
     const fig = document.createElement('figure');
     fig.className = 'folder-tile';
-    const icon = document.createElement('div');
-    icon.className = 'folder-icon';
-    icon.textContent = '📁';
+    const iconEl = document.createElement('div');
+    iconEl.className = 'folder-icon';
+    iconEl.appendChild(icon('folder'));
     const cap = document.createElement('figcaption');
     cap.textContent = name;
     const actions = document.createElement('div');
     actions.className = 'folder-actions';
     const rename = document.createElement('button');
-    rename.textContent = '✏️';
+    rename.appendChild(icon('pencil'));
     rename.title = '重命名相册（可用 / 创建多级）';
     rename.onclick = (e) => { e.stopPropagation(); renameAlbumDialog(prefix, name); };
     const move = document.createElement('button');
-    move.textContent = '📦';
+    move.appendChild(icon('folder-move'));
     move.title = '移动相册到其他位置';
     move.onclick = (e) => { e.stopPropagation(); moveAlbumDialog(prefix, name); };
     const del = document.createElement('button');
-    del.textContent = '🗑️';
+    del.appendChild(icon('trash'));
     del.title = '删除相册及其全部图片';
     del.onclick = (e) => { e.stopPropagation(); deleteAlbumDialog(prefix, name); };
     actions.append(rename, move, del);
-    fig.append(icon, actions, cap);
+    fig.append(iconEl, actions, cap);
     fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
     // 右键菜单：与悬浮按钮相同的操作
     fig.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
       showCtxMenu(e.clientX, e.clientY, [
-        { label: '📂 打开相册', onClick: () => { galleryPrefix = prefix; loadGallery(true); } },
+        { icon: 'folder', label: '打开相册', onClick: () => { galleryPrefix = prefix; loadGallery(true); } },
         '-',
-        { label: '✏️ 重命名 / 移动相册', onClick: () => renameAlbumDialog(prefix, name) },
-        { label: '📦 移动到其他位置', onClick: () => moveAlbumDialog(prefix, name) },
+        { icon: 'pencil', label: '重命名 / 移动相册', onClick: () => renameAlbumDialog(prefix, name) },
+        { icon: 'folder-move', label: '移动到其他位置', onClick: () => moveAlbumDialog(prefix, name) },
         '-',
-        { label: '🗑️ 删除相册', danger: true, onClick: () => deleteAlbumDialog(prefix, name) },
+        { icon: 'trash', label: '删除相册', danger: true, onClick: () => deleteAlbumDialog(prefix, name) },
       ]);
     });
     // 可拖拽（移动相册），也可作为放置目标：接收图片/相册，外部文件拖上来则直接上传到该相册
@@ -2163,7 +2620,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('bulkDeleteBtn').disabled = !n;
     if (n) {
       const allPublic = [...selectedKeys].every((k) => publicKeys.has(pubRelOf(k)));
-      $('bulkPublicBtn').textContent = allPublic ? '🌑 取消公开' : '🌍 设为公开';
+      const btn = $('bulkPublicBtn');
+      setIcon(btn, allPublic ? 'moon' : 'globe');
+      setLabel(btn, allPublic ? '取消公开' : '设为公开');
     }
   }
 
@@ -2221,7 +2680,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         continue;
       }
       const b = document.createElement('button');
-      b.textContent = it.label;
+      if (it.icon) b.appendChild(icon(it.icon));
+      const lbl = document.createElement('span');
+      lbl.textContent = it.label;
+      b.appendChild(lbl);
       if (it.danger) b.className = 'danger';
       b.onclick = () => { hideCtxMenu(); it.onClick(); };
       menu.appendChild(b);
@@ -2242,21 +2704,27 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const isPublic = mode === 'public';
     const fig = document.createElement('figure');
     fig.dataset.key = it.key;
+    fig.classList.add('ph'); // 缩略图骨架层，图片 onload 后摘掉（见 .grid figure.ph::before）
     if (!isPublic) {
       if (selectMode) fig.classList.add('selectable');
       const check = document.createElement('span');
       check.className = 'sel-check';
       check.hidden = !selectMode;
+      check.appendChild(icon('check'));
       fig.appendChild(check);
     }
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
-    img.src = publicUrl(it.key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
+    // 必须先挂事件再赋 src：缓存命中时 load 可能在监听器挂上之前就派发完了
+    img.onload = () => fig.classList.remove('ph');
     img.onerror = () => {
+      // 缩略图退回原图的整个过程 .ph 仍在，shimmer 自然盖住重试；原图也失败则整张卡片一起移除
       if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.key); }
       else fig.remove();
     };
+    img.src = publicUrl(it.key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
+    if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
     if (!isPublic) {
@@ -2277,11 +2745,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         e.preventDefault();
         e.stopPropagation();
         showCtxMenu(e.clientX, e.clientY, [
-          { label: '🔍 查看大图', onClick: () => openLightbox(it) },
+          { icon: 'zoom', label: '查看大图', onClick: () => openLightbox(it) },
           '-',
-          { label: '🔗 复制 URL', onClick: () => copyText(links.url) },
-          { label: '📝 复制 Markdown', onClick: () => copyText(links.markdown) },
-          { label: '🧩 复制 HTML', onClick: () => copyText(links.html) },
+          { icon: 'link', label: '复制 URL', onClick: () => copyText(links.url) },
+          { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links.markdown) },
+          { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
         ]);
       });
       return fig;
@@ -2289,7 +2757,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 公开状态切换：先给默认值，公开状态加载完成前按钮也不会空白
     const pub = document.createElement('button');
     pub.className = 'pub-toggle';
-    pub.textContent = '🌑';
+    pub.appendChild(icon('moon'));
     pub.title = '设为公开（游客可见）';
     pub.onclick = (e) => { e.stopPropagation(); togglePublic(it.key); };
     fig.appendChild(pub);
@@ -2330,16 +2798,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       e.stopPropagation();
       const on = publicKeys.has(pubRelOf(it.key));
       showCtxMenu(e.clientX, e.clientY, [
-        { label: '🔍 查看大图', onClick: () => openLightbox(it) },
+        { icon: 'zoom', label: '查看大图', onClick: () => openLightbox(it) },
         '-',
-        { label: '🔗 复制 URL', onClick: () => copyText(links.url) },
-        { label: '📝 复制 Markdown', onClick: () => copyText(links.markdown) },
-        { label: '🧩 复制 HTML', onClick: () => copyText(links.html) },
+        { icon: 'link', label: '复制 URL', onClick: () => copyText(links.url) },
+        { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links.markdown) },
+        { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
         '-',
-        { label: on ? '🌑 取消公开' : '🌍 设为公开', onClick: () => togglePublic(it.key) },
-        { label: '📦 移动到相册…', onClick: () => moveImagesDialog([it.key]) },
+        { icon: on ? 'moon' : 'globe', label: on ? '取消公开' : '设为公开', onClick: () => togglePublic(it.key) },
+        { icon: 'move', label: '移动到相册…', onClick: () => moveImagesDialog([it.key]) },
         '-',
-        { label: '🗑️ 删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
+        { icon: 'trash', label: '删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
       ]);
     });
     return fig;
@@ -2352,7 +2820,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!lightboxItem) return;
     const on = publicKeys.has(pubRelOf(lightboxItem.key));
     const btn = $('togglePublicBtn');
-    btn.textContent = on ? '🌑 取消公开' : '🌍 设为公开';
+    setIcon(btn, on ? 'moon' : 'globe');
+    setLabel(btn, on ? '取消公开' : '设为公开');
+    btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
     btn.classList.toggle('on', on);
   }
 
@@ -2384,9 +2854,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) return toast('请输入 http(s) 链接', true);
     if (!needWorker()) return;
+    const release = beginLoad(); // 转存要等 Worker 抓远程图片，可能好几秒
     const btn = $('urlBtn');
     btn.disabled = true;
-    btn.textContent = '转存中…';
+    setLabel(btn, '转存中…');
     try {
       const res = await fetch(`${cfg.worker}/url`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ url }) });
       const data = await res.json().catch(() => ({}));
@@ -2399,8 +2870,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     } catch (e) {
       toast(e.message, true);
     } finally {
+      release();
       btn.disabled = false;
-      btn.textContent = '转存';
+      setLabel(btn, '转存');
     }
   }
 
@@ -2588,6 +3060,24 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // ---------- 初始化 ----------
   $('bucketInfo').textContent = `${cfg.bucket} · ${cfg.region}`;
+
+  // 顶栏高度写回 --appbar-h，供吸顶的面包屑 / 多选栏避让。
+  // 用 ResizeObserver 而不是写死数值：窄屏顶栏 wrap 换行后高度会变。
+  const appbar = document.querySelector('.appbar');
+  const syncAppbarH = () => {
+    document.documentElement.style.setProperty('--appbar-h', appbar.offsetHeight + 'px');
+  };
+  syncAppbarH();
+  if (window.ResizeObserver) new ResizeObserver(syncAppbarH).observe(appbar);
+
+  // GitHub 入口：config.js 里没填 repo 就不显示（不硬编码地址）
+  if (cfg.repo) {
+    const link = $('repoLink');
+    link.href = cfg.repo;
+    link.title = '查看源码仓库';
+    link.hidden = false;
+  }
+
   renderHistory();
   updateUploadFab();
   switchView(view); // 有密码直接进管理视图，否则先看公开画廊

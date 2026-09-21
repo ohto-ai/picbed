@@ -17,4 +17,7 @@ window.PICBED_CONFIG = {
 
   // 相册每页加载数量
   maxKeys: 500,
+
+  // 源码仓库地址：填了会在顶栏给访客显示一个 GitHub 入口，留空则不显示
+  repo: 'https://github.com/ohto-ai/picbed',
 };
