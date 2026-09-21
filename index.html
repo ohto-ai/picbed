@@ -903,9 +903,30 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   //   · 骨架格子铺进网格，只在 reset 加载时铺
   // 骨架必须是 <div> 而不是 <figure>：refreshPublicIndicators / 多选 / 框选都会扫
   // #galleryGrid figure，混进 figure 会被当成真实图片。
-  const SK_TILES = 12;
+  // 骨架数量按可视区域算：刚好铺满一屏，骨架自己撑不出滚动条。
+  // 这几个常量必须与 .grid / .sk-tile 的样式保持一致。
+  const SK_GAP = 12;       // .grid 的 gap
+  const SK_TILE_MIN = 150; // .grid 的 minmax(150px, 1fr)
+  const SK_CHROME_H = 32;  // 卡片标题条(.sk-cap 10px + 上下 margin 20px) + 上下边框 2px
+  const SK_MAX = 60;       // 上限，防止超长屏上铺出几百个节点
   let gridLoaderSeq = 0;
   let gridLoaderOwner = 0;
+
+  function skeletonCount() {
+    const grid = $('galleryGrid');
+    const w = grid.clientWidth;
+    if (!w) return 12; // 布局尚未就绪或元素不可见，退回一个保守值
+    // 与 auto-fill + minmax(150px,1fr) 等价：能放下几列
+    const cols = Math.max(1, Math.floor((w + SK_GAP) / (SK_TILE_MIN + SK_GAP)));
+    const top = grid.getBoundingClientRect().top;
+    const more = document.querySelector('.gallery-more');
+    const moreH = more ? more.offsetHeight + 16 : 0; // 网格下方的「加载更多」也要留位
+    const availH = window.innerHeight - top - moreH - 12; // 12px 呼吸余量
+    const tileW = (w - (cols - 1) * SK_GAP) / cols; // 图片区是正方形，宽即高
+    const rowH = tileW + SK_CHROME_H + SK_GAP;
+    const rows = Math.max(2, Math.floor((availH + SK_GAP) / rowH));
+    return Math.min(SK_MAX, cols * rows);
+  }
 
   function showGridLoader(opts) {
     const o = opts || {};
@@ -918,7 +939,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const grid = $('galleryGrid');
     // 已经有骨架在屏幕上（上一次 reset 还没收尾）：沿用即可，不重复铺
     if (o.skeleton && !grid.querySelector('.sk-tile')) {
-      for (let i = 0; i < SK_TILES; i++) {
+      const n = skeletonCount();
+      for (let i = 0; i < n; i++) {
         const tile = document.createElement('div');
         tile.className = 'sk-tile';
         const im = document.createElement('div');
