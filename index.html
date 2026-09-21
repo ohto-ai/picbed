@@ -261,7 +261,6 @@ h1 {
 /* 相册 */
 /* 顶栏是 sticky 且空贴 .wrap 顶部，管理视图下工具栏是首个可见元素，给它留出上边距 */
 .gallery-toolbar { display: flex; align-items: center; gap: 8px; margin: 16px 0 12px; flex-wrap: wrap; }
-.gallery-toolbar .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
 .gallery-spacer { flex: 1; }
 #selectModeBtn.active { background: var(--grad); border-color: transparent; color: #fff; }
 #galleryCount { color: var(--muted); font-size: 12px; }
@@ -624,8 +623,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <button id="newAlbumBtn" class="btn"><svg class="ic"><use href="#i-folder-plus"/></svg><span class="lbl">新建相册</span></button>
     <button id="selectModeBtn" class="btn"><svg class="ic"><use href="#i-check-square"/></svg><span class="lbl">多选</span></button>
     <button id="refreshGallery" class="btn"><svg class="ic"><use href="#i-refresh"/></svg><span class="lbl">刷新</span></button>
-    <span class="gallery-spacer"></span>
-    <label class="check"><input type="checkbox" id="thumbMode"> 缩略图</label>
   </div>
   <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
@@ -810,12 +807,19 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   };
   let cfg = Object.assign({}, DEFAULTS, window.PICBED_CONFIG || {});
   const STORE_KEY = 'picbed_settings';
-  try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) {}
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+    // 缩略图已改为整站统一（只由 config.js 的 thumb 决定），本机不再保留这个开关。
+    // 旧版本存过 thumb:false 的话，留着会永远盖住 config.js —— 而工具栏的勾选框已经去掉，
+    // 用户再也找不到地方改回来 —— 所以直接丢掉这个键
+    delete saved.thumb;
+    cfg = Object.assign(cfg, saved);
+  } catch (e) {}
 
   function saveSettings() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       worker: cfg.worker, password: cfg.password,
-      customDomain: cfg.customDomain, format: cfg.format, thumb: cfg.thumb,
+      customDomain: cfg.customDomain, format: cfg.format,
     }));
   }
 
@@ -3085,8 +3089,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     switchView('admin');
   };
-  $('thumbMode').checked = cfg.thumb;
-  $('thumbMode').onchange = () => { cfg.thumb = $('thumbMode').checked; saveSettings(); loadGallery(true); };
   $('clearHistory').onclick = () => { history = []; persistHistory(); renderHistory(); };
   $('deleteBtn').onclick = async () => {
     if (!lightboxItem) return;
