@@ -2754,6 +2754,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       check.appendChild(icon('check'));
       fig.appendChild(check);
     }
+    const rawUrl = publicUrl(it.key);
+    // SVG 是矢量图、ICO 是图标容器：位图缩略图对它们没有意义（服务端也不支持），
+    // 直接取原图，省掉一次注定失败的往返
+    const useThumb = cfg.thumb && !/\.(svg|ico)$/i.test(it.key);
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -2761,10 +2765,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     img.onload = () => fig.classList.remove('ph');
     img.onerror = () => {
       // 缩略图退回原图的整个过程 .ph 仍在，shimmer 自然盖住重试；原图也失败则整张卡片一起移除
-      if (cfg.thumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = publicUrl(it.key); }
+      if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    img.src = publicUrl(it.key) + (cfg.thumb ? '?imageMogr2/thumbnail/500x' : '');
+    img.src = useThumb ? rawUrl + '?imageMogr2/thumbnail/500x' : rawUrl;
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
