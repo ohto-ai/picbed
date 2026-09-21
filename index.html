@@ -983,6 +983,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   let publicMarker = '';
   let publicLoaded = 0;
   const publicKeys = new Set(); // 已公开图片的相对键（相对 cfg.prefix）
+  let publicKeysLoaded = false; // publicKeys 是否已完整加载过；未加载完成时缓存不可信
 
   function pubRelOf(key) {
     const root = cfg.prefix + '/';
@@ -991,6 +992,19 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 公开标记键：img/_picbed/public/<相对键>（零字节对象）
   function pubMarkerOf(key) {
     return cfg.prefix + '/_picbed/public/' + pubRelOf(key);
+  }
+
+  // 收集 keys 中「实际已公开」的标记键。
+  // publicKeys 已完整加载过时直接查缓存（未命中即「未公开」，零额外请求）；
+  // 加载失败或尚未完成时缓存不可信，才逐张 HEAD COS 兜底 ——
+  // 否则 /public 一次失败会让后续移动静默丢掉公开状态、删除残留孤儿标记
+  async function collectPublicMarkers(keys) {
+    const out = [];
+    for (const k of keys) {
+      if (publicKeys.has(pubRelOf(k))) { out.push(pubMarkerOf(k)); continue; }
+      if (!publicKeysLoaded && (await headP(pubMarkerOf(k))).state === 'exists') out.push(pubMarkerOf(k));
+    }
+    return out;
   }
 
   function getBucketP(params) {
@@ -1124,13 +1138,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     for (const p of pairs) {
       if ((await headP(p.targetKey)).state === 'exists') collided.push(p.targetKey);
     }
-    if (!collided.length) return { action: 'go', map: {} };
+    if (!collided.length) return { action: 'go', map: {}, overwritten: [] };
     const { action } = await askDialog(`目标位置已有 ${collided.length} 个同名文件，如何处理？`, { cancel: '取消' });
-    if (action === 'cancel') return { action: 'cancel', map: {} };
-    if (action === 'overwrite') return { action: 'go', map: {} };
+    if (action === 'cancel') return { action: 'cancel', map: {}, overwritten: [] };
+    // overwritten 非空表示这些目标键将被新内容覆盖，调用方需据此校正公开标记
+    if (action === 'overwrite') return { action: 'go', map: {}, overwritten: collided };
     const map = {};
     for (const t of collided) map[t] = await autoRenameKey(t);
-    return { action: 'go', map };
+    return { action: 'go', map, overwritten: [] };
   }
 
   async function listAllKeys(prefix) {
@@ -1547,6 +1562,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     publicKeys.clear();
     next.forEach((k) => publicKeys.add(k));
+    publicKeysLoaded = true; // 完整走完一轮才标记为可信
     refreshPublicIndicators();
     updateBulkBar();
   }
@@ -1736,7 +1752,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!keys || !keys.length) return;
     if (targetPrefix === galleryPrefix) return toast('图片已经在该目录', true);
     const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
-    const { action, map } = await resolveCollisions(pairs);
+    const { action, map, overwritten } = await resolveCollisions(pairs);
     if (action === 'cancel') return toast('已取消');
     try {
       await ensureAlbumPath(targetPrefix);
@@ -1745,15 +1761,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
       }
       // 公开标记跟随图片移动（保持公开状态），旧标记随原图一起删除
-      const movedPublic = pairs.filter((p) => publicKeys.has(pubRelOf(p.key)));
-      const oldMarkers = movedPublic.map((p) => pubMarkerOf(p.key));
+      const oldMarkers = await collectPublicMarkers(keys);
+      const movedPublic = pairs.filter((p) => oldMarkers.includes(pubMarkerOf(p.key)));
       for (const p of movedPublic) {
         const newKey = map[p.targetKey] || p.targetKey;
         await putP(pubMarkerOf(newKey), '');
         publicKeys.delete(pubRelOf(p.key));
         publicKeys.add(pubRelOf(newKey));
       }
-      await deleteKeysP(keys.concat(oldMarkers));
+      // 覆盖移动时校正目标位置的公开标记：不公开的图覆盖掉公开的同名图时，
+      // 那个标记是上一个占用者留下的，会让新图凭空变公开
+      const staleTargets = (overwritten || []).filter((t) => {
+        const p = pairs.find((x) => x.targetKey === t);
+        return p && !oldMarkers.includes(pubMarkerOf(p.key));
+      });
+      const staleMarkers = await collectPublicMarkers(staleTargets);
+      staleTargets.forEach((t) => publicKeys.delete(pubRelOf(t)));
+      await deleteKeysP(keys.concat(oldMarkers, staleMarkers));
       toast('移动完成');
       clearSelection();
       loadGallery(true);
@@ -1946,7 +1970,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 子相册标记（含空相册）也要一起搬走，否则旧相册会残留在父目录
     const markers = keys.filter((k) => k.endsWith('/') && k !== oldPrefix);
     const pairs = files.map((k) => ({ key: k, targetKey: newPrefix + k.slice(oldPrefix.length) }));
-    const { action, map } = await resolveCollisions(pairs);
+    const { action, map, overwritten } = await resolveCollisions(pairs);
     if (action === 'cancel') return toast('已取消');
     // 相册内已公开的图片：标记要跟着一起搬
     const root = cfg.prefix + '/';
@@ -1960,7 +1984,19 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         pubMarkers = [];
       }
     }
-    const total = pairs.length + markers.length + pubMarkers.length;
+    // 本次移动中「源图公开」的图片（以服务端列出的标记为准，与上面的 pubMarkers 同源）
+    const publicSourceKeys = new Set(
+      pubMarkers.map((m) => cfg.prefix + '/' + oldRel + m.slice((pubRoot + oldRel).length))
+    );
+    // 覆盖移动时，被覆盖的目标键上遗留的公开标记必须清掉：
+    // 不公开的图覆盖掉公开的同名图，旧标记会让新图凭空变公开
+    const staleTargets = (overwritten || []).filter((t) => {
+      const p = pairs.find((x) => x.targetKey === t);
+      return p && !publicSourceKeys.has(p.key);
+    });
+    const staleMarkers = await collectPublicMarkers(staleTargets);
+    staleTargets.forEach((t) => publicKeys.delete(pubRelOf(t)));
+    const total = pairs.length + markers.length + pubMarkers.length; // staleMarkers 在最后批量删除，不计入逐项进度
     let done = 0;
     try {
       for (const p of pairs) {
@@ -1976,14 +2012,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       for (const m of pubMarkers) {
         const inside = m.slice((pubRoot + oldRel).length); // 相册内的相对键
         const oldReal = cfg.prefix + '/' + oldRel + inside;
-        const newReal = map[oldReal] || newPrefix + inside;
+        // map 以「目标键」为键（resolveCollisions 的约定），必须用 newPrefix+inside 查，
+        // 不能用 oldReal —— 否则目标有同名文件被自动重命名时，标记会写到旧的路径上
+        const newReal = map[newPrefix + inside] || newPrefix + inside;
         await putP(pubMarkerOf(newReal), '');
         publicKeys.delete(pubRelOf(oldReal));
         publicKeys.add(pubRelOf(newReal));
         done++;
         if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
       }
-      await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 旧相册标记 + 子相册旧标记 + 旧公开标记
+      await deleteKeysP(keys.concat(pubMarkers, staleMarkers)); // 文件 + 旧相册标记 + 子相册旧标记 + 旧公开标记 + 被覆盖目标的遗留标记
       await ensureAlbumPath(newPrefix); // 多级路径逐层建好，并补上新相册标记
       toast('移动完成');
       loadGallery(true);
@@ -2148,7 +2186,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // 删除图片（连带清理公开标记）：批量栏、右键菜单、灯箱共用
   async function deleteImages(keys) {
-    const markers = keys.filter((k) => publicKeys.has(pubRelOf(k))).map(pubMarkerOf);
+    const markers = await collectPublicMarkers(keys);
     await deleteKeysP(keys.concat(markers));
     keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
     toast('已删除');
