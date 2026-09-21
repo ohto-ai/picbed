@@ -903,10 +903,19 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   //   · 骨架格子铺进网格，只在 reset 加载时铺
   // 骨架必须是 <div> 而不是 <figure>：refreshPublicIndicators / 多选 / 框选都会扫
   // #galleryGrid figure，混进 figure 会被当成真实图片。
+  // 网格几何：骨架数量和缩略图尺寸都按它算，必须与 .grid 的样式保持一致
+  const GRID_GAP = 12;       // .grid 的 gap
+  const GRID_TILE_MIN = 150; // .grid 的 minmax(150px, 1fr)
+
+  // 当前布局下每个格子的实际宽度（CSS 像素）
+  function gridTileSize() {
+    const w = $('galleryGrid').clientWidth;
+    if (!w) return 0; // 布局未就绪或元素不可见
+    const cols = Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
+    return (w - (cols - 1) * GRID_GAP) / cols;
+  }
+
   // 骨架数量按可视区域算：刚好铺满一屏，骨架自己撑不出滚动条。
-  // 这几个常量必须与 .grid / .sk-tile 的样式保持一致。
-  const SK_GAP = 12;       // .grid 的 gap
-  const SK_TILE_MIN = 150; // .grid 的 minmax(150px, 1fr)
   const SK_CHROME_H = 32;  // 卡片标题条(.sk-cap 10px + 上下 margin 20px) + 上下边框 2px
   const SK_MAX = 60;       // 上限，防止超长屏上铺出几百个节点
   let gridLoaderSeq = 0;
@@ -915,17 +924,35 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   function skeletonCount() {
     const grid = $('galleryGrid');
     const w = grid.clientWidth;
-    if (!w) return 12; // 布局尚未就绪或元素不可见，退回一个保守值
-    // 与 auto-fill + minmax(150px,1fr) 等价：能放下几列
-    const cols = Math.max(1, Math.floor((w + SK_GAP) / (SK_TILE_MIN + SK_GAP)));
+    const tileW = gridTileSize();
+    if (!w || !tileW) return 12; // 布局尚未就绪或元素不可见，退回一个保守值
+    const cols = Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
     const top = grid.getBoundingClientRect().top;
     const more = document.querySelector('.gallery-more');
     const moreH = more ? more.offsetHeight + 16 : 0; // 网格下方的「加载更多」也要留位
     const availH = window.innerHeight - top - moreH - 12; // 12px 呼吸余量
-    const tileW = (w - (cols - 1) * SK_GAP) / cols; // 图片区是正方形，宽即高
-    const rowH = tileW + SK_CHROME_H + SK_GAP;
-    const rows = Math.max(2, Math.floor((availH + SK_GAP) / rowH));
+    const rowH = tileW + SK_CHROME_H + GRID_GAP; // 图片区是正方形，宽即高
+    const rows = Math.max(2, Math.floor((availH + GRID_GAP) / rowH));
     return Math.min(SK_MAX, cols * rows);
+  }
+
+  // 缩略图边长：按格子实际宽度 × 屏幕像素比算，不再写死 500。
+  // 两个要点：
+  //   1. 格子里只显示居中的正方形（.grid img 是 aspect-ratio:1 + object-fit:cover），
+  //      决定清晰度的是原图**短边**；而 imageMogr2/thumbnail 只能按长边限制，
+  //      常见的 4:3 / 3:4 短边是长边的 0.75，所以要留 4/3 的余量。
+  //   2. 量化到 50px 台阶：否则每个视口宽度都算出一个新 URL，缓存会被打散。
+  const THUMB_DPR_CAP = 2;      // 屏幕像素比封顶 2x；3x 屏再多 2.25 倍像素，观感提升很小
+  const THUMB_ASPECT_PAD = 4 / 3;
+  const THUMB_STEP = 50;
+  const THUMB_FALLBACK = 500;   // 布局未就绪时的保守值
+
+  function thumbSize() {
+    const tile = gridTileSize();
+    if (!tile) return THUMB_FALLBACK;
+    const dpr = Math.min(window.devicePixelRatio || 1, THUMB_DPR_CAP);
+    const need = tile * dpr * THUMB_ASPECT_PAD;
+    return Math.min(1000, Math.max(200, Math.ceil(need / THUMB_STEP) * THUMB_STEP));
   }
 
   function showGridLoader(opts) {
@@ -1931,7 +1958,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const items = (data.Contents || [])
         .filter((c) => !c.Key.endsWith('/') && c.Key !== prefix)
         .reverse();
-      for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }));
+      const thumbN = cfg.thumb ? thumbSize() : 0; // 量一次布局，循环里复用
+      for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }, '', thumbN));
       refreshPublicIndicators(); // 公开状态可能先于/后于相册加载完成，渲染后再同步一次
       galleryLoaded += items.length;
       $('galleryCount').textContent = `已显示 ${galleryLoaded} 张`;
@@ -1996,8 +2024,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         for (const folder of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(folder));
       }
       const files = (data.files || []).slice().reverse();
+      const thumbN = cfg.thumb ? thumbSize() : 0; // 量一次布局，循环里复用
       for (const f of files) {
-        $('galleryGrid').appendChild(renderGridItem({ key: cfg.prefix + '/' + f.key }, 'public'));
+        $('galleryGrid').appendChild(renderGridItem({ key: cfg.prefix + '/' + f.key }, 'public', thumbN));
       }
       publicLoaded += files.length;
       $('galleryCount').textContent = `已显示 ${publicLoaded} 张公开图片`;
@@ -2741,7 +2770,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!e.target.closest('#galleryGrid')) hideCtxMenu();
   });
 
-  function renderGridItem(it, mode) {
+  // thumbN：缩略图边长，0 表示取原图。由调用方算一次传进来 ——
+  // renderGridItem 是在循环里逐张 append 的，若在这里现算会反复触发同步布局
+  function renderGridItem(it, mode, thumbN) {
     const isPublic = mode === 'public';
     const fig = document.createElement('figure');
     fig.dataset.key = it.key;
@@ -2756,8 +2787,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     const rawUrl = publicUrl(it.key);
     // SVG 是矢量图、ICO 是图标容器：位图缩略图对它们没有意义（服务端也不支持），
-    // 直接取原图，省掉一次注定失败的往返
-    const useThumb = cfg.thumb && !/\.(svg|ico)$/i.test(it.key);
+    // 直接取原图，省掉一次注定失败的往返。
+    // 用 NxN> 而不是 Nx：后者是把宽度"设成" N（小图会被放大），前者是长边不超过 N 且只缩不放。
+    const useThumb = !!thumbN && !/\.(svg|ico)$/i.test(it.key);
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -2768,7 +2800,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    img.src = useThumb ? rawUrl + '?imageMogr2/thumbnail/500x' : rawUrl;
+    img.src = useThumb ? rawUrl + '?imageMogr2/thumbnail/' + thumbN + 'x' + thumbN + '>' : rawUrl;
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
