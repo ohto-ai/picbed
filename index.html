@@ -1404,6 +1404,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   let galleryMarker = '';
   let galleryLoaded = 0;
   let galleryPrefix = cfg.prefix + '/'; // 当前目录（尾部带 /）
+  // 相册内容的世代号：每次发起加载都 ++（管理视图与公开画廊共用同一个 #galleryGrid，
+  // 所以也共用一个世代号）。await 返回后只有「最新一次」请求有权往网格里写内容与分页
+  // 状态 —— 否则「打开子相册，还没加载完就退回父目录」时，子相册的响应会晚于父目录
+  // 到达，把子相册的条目追加到已经渲染好的父目录下面。与 gridLoaderSeq 同一套思路，
+  // 区别是那个只管骨架/转圈的收尾，这个管网格内容。
+  let galleryReqSeq = 0;
   let selectMode = false;
   const selectedKeys = new Set();
   let anchorFig = null; // Shift 连选的锚点卡片
@@ -1866,7 +1872,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   async function loadGallery(reset) {
-    if (!needWorker()) return;
+    if (!needWorker()) return; // 提前返回前不作废在途请求：这条路不清网格，让它照常渲染
+    const seq = ++galleryReqSeq; // 本次加载取得所有权，所有在途请求就此作废
+    const prefix = galleryPrefix; // 快照：await 期间用户可能已经切到别的目录
     if (reset) {
       galleryMarker = '';
       galleryLoaded = 0;
@@ -1881,11 +1889,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     loadMoreState(true);
     try {
       const data = await getBucketP({
-        Prefix: galleryPrefix,
+        Prefix: prefix,
         Delimiter: '/',
         MaxKeys: cfg.maxKeys || 500,
         Marker: galleryMarker,
       });
+      if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       renderBreadcrumb();
       if (reset) {
         const reserved = cfg.prefix + '/_picbed/';
@@ -1895,7 +1904,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         }
       }
       const items = (data.Contents || [])
-        .filter((c) => !c.Key.endsWith('/') && c.Key !== galleryPrefix)
+        .filter((c) => !c.Key.endsWith('/') && c.Key !== prefix)
         .reverse();
       for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }));
       refreshPublicIndicators(); // 公开状态可能先于/后于相册加载完成，渲染后再同步一次
@@ -1905,11 +1914,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       btn.hidden = !galleryMarker;
     } catch (e) {
       console.error('[picbed] 相册加载失败:', e.message || e);
-      toast('相册加载失败：' + ((e && e.error && e.error.Message) || e.message || e), true);
+      // 已经切走就连报错都不弹：用户看的是别的目录，这次失败与他无关
+      if (seq === galleryReqSeq) toast('相册加载失败：' + ((e && e.error && e.error.Message) || e.message || e), true);
     } finally {
-      hideGridLoader(gridSeq);
+      hideGridLoader(gridSeq); // 内部按 gridLoaderOwner 判断，旧请求撤不掉新请求的骨架
       release();
-      loadMoreState(false);
+      if (seq === galleryReqSeq) loadMoreState(false); // 旧请求收尾时别解开新请求的「加载中」
     }
   }
 
@@ -1927,6 +1937,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   async function loadPublicGallery(reset) {
+    const seq = ++galleryReqSeq; // 与 loadGallery 共用世代号：网格是同一个
     if (reset) {
       publicMarker = '';
       publicLoaded = 0;
@@ -1934,6 +1945,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     // 离线访客不点亮任何加载指示：beginLoad 必须在这些提前返回之后
     if (!cfg.worker) {
+      // 上面已经清空网格并作废了在途请求，那条路的 loadMoreState(false) 不会再执行，这里补上
+      loadMoreState(false);
       renderBreadcrumb();
       publicGridHint('还没有配置图片服务地址，无法加载公开画廊。', 'alert');
       return;
@@ -1951,6 +1964,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       renderBreadcrumb();
       if (reset) {
         for (const folder of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(folder));
@@ -1968,12 +1982,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       }
     } catch (e) {
       console.error('[picbed] 公开画廊加载失败:', e.message || e);
+      if (seq !== galleryReqSeq) return; // 已经切走：别用错误提示盖掉新视图的内容
       if (reset) publicGridHint('公开画廊加载失败：' + (e.message || '无法连接服务') + '（若刚更新过页面，请确认 Worker 已重新部署）', 'alert');
       toast('公开画廊加载失败：' + (e.message || e), true);
     } finally {
-      hideGridLoader(gridSeq);
+      hideGridLoader(gridSeq); // 内部按 gridLoaderOwner 判断，旧请求撤不掉新请求的骨架
       release();
-      loadMoreState(false);
+      if (seq === galleryReqSeq) loadMoreState(false); // 旧请求收尾时别解开新请求的「加载中」
     }
   }
 
