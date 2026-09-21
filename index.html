@@ -1903,6 +1903,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       $('galleryGrid').textContent = '';
       clearSelection();
     }
+    // 提前渲染面包屑：既让导航目标立刻可见，也让下面骨架量高度时量的是最终布局
+    // （空的面包屑比填满后矮约 29px，量早了会多算一行骨架）
+    renderBreadcrumb();
     const release = beginLoad();
     const gridSeq = showGridLoader(reset
       ? { skeleton: true, text: '正在加载相册…' }
@@ -1917,7 +1920,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         Marker: galleryMarker,
       });
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
-      renderBreadcrumb();
+      // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       if (reset) {
         const reserved = cfg.prefix + '/_picbed/';
         for (const f of data.CommonPrefixes || []) {
@@ -1973,6 +1976,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       publicGridHint('还没有配置图片服务地址，无法加载公开画廊。', 'alert');
       return;
     }
+    renderBreadcrumb(); // 同上：先渲染，骨架才量得准
     const release = beginLoad();
     const gridSeq = showGridLoader(reset
       ? { skeleton: true, text: '正在加载公开画廊…' }
@@ -1987,7 +1991,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
-      renderBreadcrumb();
+      // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       if (reset) {
         for (const folder of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(folder));
       }
