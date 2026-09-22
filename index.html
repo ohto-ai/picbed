@@ -448,6 +448,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .lightbox-close:hover { border-color: var(--accent); color: var(--accent); }
 .lightbox-close .ic { width: 16px; height: 16px; }
 .lightbox-info { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+/* 大图进度：放在信息区而不是压在照片上 —— 原图多 MB，这是全站最需要反馈的地方 */
+.lb-dl { display: flex; align-items: center; gap: 10px; width: min(420px, 70vw); }
+.lb-dl-bar { flex: 1; height: 4px; background: rgba(255, 255, 255, .16); border-radius: 2px; overflow: hidden; }
+.lb-dl-bar b { display: block; height: 100%; width: 0; background: var(--grad); border-radius: 2px; transition: width .2s; }
+.lb-dl.indet .lb-dl-bar b { opacity: .45; } /* 总长未知：条走满但不报数字 */
+.lb-dl-text { font-size: 12px; color: #cbd5e1; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
 .lightbox-name { font-size: 12px; color: #cbd5e1; word-break: break-all; text-align: center; }
 .lightbox-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .lightbox-actions .btn { background: rgba(255, 255, 255, .10); border-color: rgba(255, 255, 255, .18); color: #eef1f7; box-shadow: none; }
@@ -543,7 +549,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   background-size: 220% 100%; animation: shimmer 1.3s linear infinite;
 }
 
-/* 缩略图骨架：挂在 figure 上而非 img（img 是替换元素，不渲染 ::before） */
+/* 缩略图骨架：挂在 figure 上而非 img（img 是替换元素，不渲染 ::before）。
+   自取（见「缩略图下载与进度」）时摘得早：第一帧模糊图到手就摘，不再等整张下完。 */
 .grid figure img { transition: opacity .3s ease; }
 .grid figure.ph img { opacity: 0; }
 .grid figure.ph::before {
@@ -552,6 +559,25 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   background-size: 220% 100%; animation: shimmer 1.3s linear infinite;
 }
 @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+
+/* 卡片下载进度：挂在 figure 上，用和 shimmer 同一招（left/right/top + aspect-ratio:1）
+   自成一个「图片区」覆盖层 —— 这样不必给 img 套 wrapper，卡片的布局、拖拽、框选都不受影响 */
+.grid figure .dl {
+  position: absolute; left: 0; right: 0; top: 0; aspect-ratio: 1; z-index: 2;
+  display: grid; place-items: center; pointer-events: none; /* 不能挡住点开大图 */
+  opacity: 0; transition: opacity .18s;
+}
+.grid figure .dl.on { opacity: 1; }
+.grid figure .dl-pct {
+  padding: 3px 7px; border-radius: 8px; font-size: 12px; line-height: 1;
+  font-variant-numeric: tabular-nums; /* 数字等宽，跳动时不左右抖 */
+  background: var(--glass-strong); border: 1px solid var(--border); color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.grid figure .dl-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, .28); }
+.grid figure .dl-bar b { display: block; height: 100%; width: 0; background: var(--grad); transition: width .2s; }
+/* 总长未知（没有 Content-Length）：条走满但不报数字，别编一个 */
+.grid figure .dl.indet .dl-bar b { opacity: .45; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
@@ -782,6 +808,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <button id="lightboxClose" class="lightbox-close" title="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
     <img id="lightboxImg" alt="">
     <div class="lightbox-info">
+      <div id="lightboxDl" class="lb-dl" hidden><span id="lightboxDlText" class="lb-dl-text"></span><i class="lb-dl-bar"><b id="lightboxDlFill"></b></i></div>
       <div id="lightboxName" class="lightbox-name"></div>
       <div class="lightbox-actions">
         <button class="btn small" data-fmt="url"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">URL</span></button>
@@ -1007,6 +1034,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const dpr = Math.min(window.devicePixelRatio || 1, THUMB_DPR_CAP);
     const need = tile * dpr;
     return Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.ceil(need / THUMB_STEP) * THUMB_STEP));
+  }
+
+  // 缩略图地址的唯一构造点：自家下载和原生加载必须拿到同一个字符串，
+  // 否则 fetch 与 <img> 会各打一次网络，那 30 天的 HTTP 缓存也白攒。
+  //
+  // JPEG 带 /interlace/1 让服务端输出渐进式 JPEG（实测 SOF2），这是「加载多少显示多少」的关键：
+  // 截断的渐进式 JPEG 会渲染出整张模糊图，而不是半张。
+  // PNG 改成 WebP：实测裁切后的 PNG 缩略图比 JPEG 重 6~8 倍（350px 要 99~182KB，WebP q85 只要 9~22KB），
+  // 画质差在缩略图尺寸下看不出来（与原 PNG 逐像素平均差 1.7~2.4，满值 255）。
+  // 只动这两种扩展名 —— 其它格式没验过，万一不支持就是一次 400 + 退回原图，不值当。
+  // 已知取舍：WebP 截断状态下画不出东西，所以这些卡片不做增量显形（见 dlRun 里的 revealable），
+  // 另外若将来有真正带透明的 PNG，缩略图会丢掉透明（原图不受影响，灯箱照旧）。
+  function thumbUrl(rawUrl, key, thumbN) {
+    const base = rawUrl + '?imageMogr2/crop/' + thumbN + 'x' + thumbN + '/gravity/center';
+    if (/\.jpe?g$/i.test(key)) return base + '/interlace/1';
+    if (/\.png$/i.test(key)) return base + '/format/webp/quality/85';
+    return base;
   }
 
   function showGridLoader(opts) {
@@ -1970,6 +2014,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       galleryMarker = '';
       galleryLoaded = 0;
       $('galleryGrid').textContent = '';
+      dlCancelAll(); // 和在途下载成对：卡片都没了，就别再往下下（blob 也在这里一起回收）
       clearSelection();
     }
     // 提前渲染面包屑：既让导航目标立刻可见，也让下面骨架量高度时量的是最终布局
@@ -2037,6 +2082,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       publicMarker = '';
       publicLoaded = 0;
       $('galleryGrid').textContent = '';
+      dlCancelAll(); // 同上：网格清了，在途的缩略图请求与 blob 一起收掉
     }
     // 离线访客不点亮任何加载指示：beginLoad 必须在这些提前返回之后
     if (!cfg.worker) {
@@ -2214,6 +2260,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     closeLightbox();
     $('galleryCount').textContent = '';
     $('galleryGrid').textContent = '';
+    dlCancelAll(); // 切视图：上一个视图还在下的缩略图立刻停掉
     $('loadMore').hidden = true;
     if (view === 'public') {
       loadPublicGallery(true);
@@ -2812,6 +2859,304 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!e.target.closest('#galleryGrid')) hideCtxMenu();
   });
 
+  // ---------- 缩略图下载与进度 ----------
+  // 为什么自己下载：原生 <img> 的字节进度没有任何接口可观测，要真实百分比就只能自己 fetch。
+  // 代价是浏览器原本白送的东西得自己补：懒加载、并发上限，以及「加载多少显示多少」——
+  // 后者靠把已收字节反复包成 blob 换 src：mogr2 的 interlace/1 让 JPEG 变渐进式，
+  // 实测截断到 12% 字节就能渲染出整张模糊图并随字节变锐，而且截断的数据派发的是 load 不是 error。
+  // 这条路任何一环走不通（老浏览器、CORS 没了）就整会话退回原生加载，卡片行为与改造前一致。
+  const DL_CONCURRENCY = 6;        // 在途上限：不设的话一次 reset 会同时开几百个请求（原生懒加载本来是浏览器在管）
+  const DL_AHEAD = '800px 0px';    // 提前约一屏开始下，滚起来不至于看到一片空卡
+  const DL_SHOW_MS = 300;          // 快过这个时间连进度层都不显示：实测边缘命中的缩略图只要 58ms，显示了只会闪一下
+  const DL_DONE_HOLD_MS = 200;     // 100% 后让进度层多留一下，别在眼前一跳就没
+  const DL_REVEAL_MS = 150;        // 两次增量显形的最小间隔（也是「慢到值得显形」的门槛：快下载根本轮不到）
+  const DL_REVEAL_SLOW_MS = 400;   // 显形次数用满后放慢，别反复解码
+  const DL_REVEAL_MAX = 8;         // 单卡最多显形几次：new Blob() 会拷贝已收字节，次数必须封顶
+  const DL_REVEAL_MIN = 4096;      // 少于这么多字节不显形：那时只是一张 8x8 的糊图，白解一次码
+  const DL_REVEAL_BIG = 1 << 20;   // 超过 1MB（原图回退路径）显形砍到 3 次：解码大图不便宜
+  const DL_STREAM_CAP = 8 << 20;   // 超过 8MB 干脆不显形，只更新进度条
+
+  let dlOk = null;              // null=未判明；false=这条路整会话作废，后面的卡片直接走原生
+  // 世代号：网格被清空时 ++，在途任务据此自我作废。
+  // 不能借用 galleryReqSeq —— 点「加载更多」也会动它，那会误杀上一页还在下的缩略图。
+  let dlEpoch = 0;
+  let dlActive = 0;             // 在途请求数
+  const dlQueue = [];           // 等并发位的任务（先进先出；有 DL_AHEAD 约束，队列最多也就两屏长）
+  const dlInflight = new Set(); // 在途任务的 AbortController
+  const dlBlobs = new Set();    // 已交给 <img> 的 blob URL：换新时 revoke 旧的，清网格时整批 revoke
+  let dlIO = null;              // 共享的 IntersectionObserver，懒创建
+
+  // 退回原生加载：行为与改造前逐字一致（懒加载 + shimmer 撑到 onload）
+  function dlNative(job) {
+    const { fig, img } = job;
+    if (fig.__dl) { fig.__dl = null; if (dlIO) dlIO.unobserve(fig); }
+    if (job.started) return;  // 已经有像素显示着了，别拿网络地址把它顶掉
+    job.started = true;
+    img.src = job.url;
+  }
+
+  // 登记一张卡片：能自取就等它进视口再下，不能就立刻交给浏览器
+  function dlLoad(job) {
+    if (dlOk === false || !('IntersectionObserver' in window)) return dlNative(job);
+    if (typeof fetch !== 'function' || !('ReadableStream' in window)) return dlNative(job);
+    if (!dlIO) {
+      dlIO = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          dlIO.unobserve(e.target); // 只管「什么时候开始下」；之后不再回看，也就不占着这几百个引用
+          const job = e.target.__dl;
+          e.target.__dl = null;
+          if (job) dlPush(job);
+        }
+      }, { rootMargin: DL_AHEAD });
+    }
+    job.fig.__dl = job;
+    dlIO.observe(job.fig);
+  }
+
+  function dlPush(job) {
+    if (dlActive < DL_CONCURRENCY) dlStart(job);
+    else dlQueue.push(job);
+  }
+
+  async function dlStart(job) {
+    if (dlOk === false) return dlNative(job); // 中途判明走不通：排队里的别再白试一次
+    dlActive++;
+    try { await dlStream(job, dlCardSink(job)); }
+    finally {
+      dlActive--;
+      // 队列里混着已经被清出网格的卡片（切相册/切视图）时跳过它们，直接轮到下一个
+      while (dlQueue.length) {
+        const next = dlQueue.shift();
+        if (next.fig.isConnected) { dlStart(next); break; }
+      }
+    }
+  }
+
+  // 先在游离的 Image 上把这一帧解出来再换 src，换的那一下才不会闪空白。
+  // 不能只用 img.decode()：规范上它对解不出来的图会 reject，而本功能恰恰全靠截断的图能出画面，
+  // 所以 decode() 只当快路径，失败就退回 load 事件。
+  function dlDecode(url) {
+    const pre = new Image();
+    pre.src = url;
+    return pre.decode().then(() => true, () => new Promise((res) => {
+      // 已经尘埃落定（成功或失败）就别再挂事件等了：那两种事件的派发时机已过，promise 会永远悬着，
+      // 而它悬着会把整个读取循环卡住（外面 await 着它）
+      if (pre.complete) return res(!!pre.naturalWidth); // 截断图已经派发过 load，只是 decode() 不认
+      pre.onload = () => res(true);
+      pre.onerror = () => res(false);
+    }));
+  }
+
+  // 换上一批字节；返回是否真的换了。revoke 旧 blob 是安全的：img 已经拿着解码后的位图。
+  // job.cancelled 是给灯箱用的：关灯箱只 abort 在途请求，不改 dlEpoch（那会连网格一起废掉），
+  // 所以正在等解码的那次换帧得自己认账 —— 否则它回来时会往已经关掉的灯箱上挂一个新 blob，谁都不再回收。
+  async function dlSwap(job, blob) {
+    const url = URL.createObjectURL(blob);
+    dlBlobs.add(url);
+    if (!(await dlDecode(url)) || job.epoch !== dlEpoch || job.cancelled) {
+      dlBlobs.delete(url);
+      URL.revokeObjectURL(url);
+      return false;
+    }
+    const prev = job.blobUrl;
+    job.blobUrl = url;
+    job.img.src = url;
+    job.started = true;
+    if (prev) { dlBlobs.delete(prev); URL.revokeObjectURL(prev); }
+    return true;
+  }
+
+  // 进度层：懒创建 —— 快下载按 DL_SHOW_MS 的规则根本轮不到它，那就一个节点都别建
+  function dlLayer(job) {
+    if (!job.layer) {
+      const layer = document.createElement('div');
+      layer.className = 'dl';
+      const pct = document.createElement('span');
+      pct.className = 'dl-pct';
+      pct.setAttribute('aria-hidden', 'true'); // 十几张卡同时报百分比，读屏是灾难
+      const bar = document.createElement('i');
+      bar.className = 'dl-bar';
+      bar.appendChild(document.createElement('b'));
+      layer.append(pct, bar);
+      job.fig.appendChild(layer);
+      job.layer = layer;
+      job.pctEl = pct;
+      job.fillEl = bar.firstChild;
+    }
+    return job.layer;
+  }
+
+  function dlPaint(job) {
+    if (!job.shown) return;
+    job.pctEl.textContent = job.total ? job.pct + '%' : ''; // 总长未知就不报数字，别编一个
+    job.fillEl.style.width = (job.total ? job.pct : 100) + '%';
+    job.layer.classList.toggle('indet', !job.total);
+  }
+
+  function dlShow(job) {
+    dlLayer(job);
+    job.shown = true;
+    job.layer.classList.add('on');
+    dlPaint(job);
+  }
+
+  // 卡片的进度层：进度画在卡片上，收尾是摘骨架，失效判据是「卡片还在网格里」
+  function dlCardSink(job) {
+    return {
+      show: () => dlShow(job),
+      paint: () => dlPaint(job),
+      frame: () => job.fig.classList.remove('ph'), // 第一帧到手就摘骨架：宁可看模糊的整图，也别让 shimmer 盖着已到的像素
+      done: () => {
+        job.fig.classList.remove('ph');
+        setTimeout(() => { if (job.layer) job.layer.classList.remove('on'); }, DL_DONE_HOLD_MS);
+      },
+      fail: () => {
+        if (job.layer) job.layer.classList.remove('on');
+        dlNative(job);
+      },
+      alive: () => job.fig.isConnected,
+    };
+  }
+
+  // 灯箱的进度：进度画在信息区那条，收尾是收起它，失效判据是「还是当前这张、灯箱还开着」
+  function dlBoxSink(job) {
+    const box = $('lightboxDl'), text = $('lightboxDlText'), fill = $('lightboxDlFill');
+    return {
+      show: () => { box.hidden = false; },
+      paint: () => {
+        text.textContent = job.total ? job.pct + '%' : '';
+        fill.style.width = (job.total ? job.pct : 100) + '%';
+        box.classList.toggle('indet', !job.total);
+      },
+      frame: () => {}, // 大图不需要额外的收尾动作
+      done: () => { setTimeout(() => { if (lightboxJob === job) box.hidden = true; }, DL_DONE_HOLD_MS); },
+      fail: () => { box.hidden = true; job.img.src = job.url; }, // 退回原生：浏览器自己下，和改造前一样
+      cancel: () => { box.hidden = true; },
+      alive: () => lightboxJob === job && !$('lightbox').hidden,
+    };
+  }
+
+  // 流式取图的核心：卡片与灯箱共用。差别只有「进度画到哪、收尾做什么、什么时候算失效」，
+  // 所以全收在 sink 里；取字节那套（总长、分片、节流更新、增量显形、中止、退路）只有这一份。
+  // job: { img, url, rawUrl, thumb, epoch, bytes, total, pct, started, blobUrl }
+  async function dlStream(job, sink) {
+    const ctrl = new AbortController();
+    const epoch = job.epoch;
+    job.ctrl = ctrl;
+    dlInflight.add(ctrl);
+    const showTimer = setTimeout(() => sink.show(), DL_SHOW_MS);
+    const chunks = [];
+    let gotResponse = false; // 连响应都没拿到就失败 = 这条路整体不通（详见 catch）
+    try {
+      let res = await fetch(job.url, { mode: 'cors', signal: ctrl.signal });
+      gotResponse = true;
+      // 缩略图这条路服务端不认（格式不支持之类）：换原图再下一遍 —— 进度条在这条路上最值钱
+      if (!res.ok && job.thumb) {
+        job.thumb = false;
+        job.url = job.rawUrl;
+        job.img.dataset.raw = '1'; // 原生那边不许再退一次
+        res = await fetch(job.url, { mode: 'cors', signal: ctrl.signal });
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.body || !res.body.getReader) throw new Error('响应不可流式读取');
+      const mime = res.headers.get('content-type') || '';
+      job.total = Number(res.headers.get('content-length')) || 0;
+      // 增量显形只对「截断也能出画面」的格式有意义：实测 JPEG（渐进/基线）与 PNG 都会把已收到的那部分
+      // 画出来，而单帧 WebP 在截断状态下什么都不画 —— 那时换 src 会把骨架摘掉、露出一张空卡，比不换更糟。
+      // 缩略图里的 PNG 现在就被转成了 WebP（见 thumbUrl），未来 CDN 若自动转码也会走到这里。
+      const revealable = /^image\/(jpeg|png)/i.test(mime);
+      const maxReveals = !revealable ? 0 : (job.total > DL_STREAM_CAP ? 0 : (job.total > DL_REVEAL_BIG ? 3 : DL_REVEAL_MAX));
+      const reader = res.body.getReader();
+      let lastReveal = 0, reveals = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        job.bytes += value.length;
+        if (job.total && job.bytes > job.total) job.total = 0; // 响应被压缩之类：总长不可信了，退回不定长
+        const pct = job.total ? Math.min(99, Math.floor((job.bytes / job.total) * 100)) : 0; // 还没读完不许写 100%
+        if (pct !== job.pct) { job.pct = pct; sink.paint(); }
+        if (reveals < maxReveals && job.bytes >= DL_REVEAL_MIN) {
+          const now = performance.now();
+          if (now - lastReveal >= (reveals >= DL_REVEAL_MAX ? DL_REVEAL_SLOW_MS : DL_REVEAL_MS)) {
+            lastReveal = now;
+            reveals++;
+            if (await dlSwap(job, new Blob(chunks, { type: mime }))) sink.frame();
+          }
+        }
+        if (epoch !== dlEpoch || !sink.alive()) { // 目标已经不在了（卡片被清出网格 / 灯箱关了或换了图）
+          reader.cancel().catch(() => {});
+          if (sink.cancel) sink.cancel();
+          return;
+        }
+      }
+      if (!(await dlSwap(job, new Blob(chunks, { type: mime })))) throw new Error('这一帧解不出来');
+      if (job.total) { job.pct = 100; sink.paint(); }
+      sink.done();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;  // 主动掐的：目标已经不在，什么都不能碰
+      // 连响应都没拿到 = 网络/CORS 级失败：这条路整会话作废，后面的卡片直接走原生。
+      // 不用 e instanceof TypeError 判断：那是跨 realm 就不成立的写法（比如被别的作用域里的
+      // fetch 拒绝、或测试桩抛的错），而这条判定的代价是一整轮白试。
+      if (!gotResponse) dlOk = false;
+      sink.fail();
+    } finally {
+      clearTimeout(showTimer);
+      dlInflight.delete(ctrl);
+    }
+  }
+
+  // 悬停意图预取：灯箱用的是原图 URL，和网格的裁切 URL 不是同一个，不预取的话点开必然从头下一遍。
+  // 门槛故意设得偏长（700ms）：鼠标扫过一排卡片不该触发几 MB 的下载，只有真的停下来看的那张才值。
+  // 取回的字节直接丢掉，图的是落进 HTTP 缓存 —— 点开时那次 fetch 命中缓存，灯箱就是秒开。
+  // 优先级压到 low：网格自己还在下缩略图时，别跟它抢带宽。
+  const PF_HOVER_MS = 700;
+  const PF_MAX_BYTES = 6 << 20; // 超过这个大小的原图不预取：替用户省流量，比替他省一次等待重要
+  let pfTimer = 0;
+  let pfCtrl = null;
+
+  function pfCancel() {
+    clearTimeout(pfTimer);
+    pfTimer = 0;
+    if (pfCtrl) { pfCtrl.abort(); pfCtrl = null; }
+  }
+
+  function pfHover(key) {
+    pfCancel(); // 换到别的卡片：上一张的意图作废
+    if (dlOk === false || lightboxItem) return; // 这条路走不通、或正在看大图，都不预取
+    pfTimer = setTimeout(() => pfStart(publicUrl(key)), PF_HOVER_MS);
+  }
+
+  async function pfStart(url) {
+    if (document.hidden || lightboxItem) return;
+    const ctrl = new AbortController();
+    pfCtrl = ctrl;
+    try {
+      const res = await fetch(url, { mode: 'cors', signal: ctrl.signal, priority: 'low' });
+      if (!res.ok) return;
+      if ((Number(res.headers.get('content-length')) || 0) > PF_MAX_BYTES) { ctrl.abort(); return; }
+      await res.arrayBuffer(); // 读完才会真的落进 HTTP 缓存，只拿响应头不算
+    } catch (e) {
+      /* 预取失败无所谓：点开时照旧走正常流程 */
+    } finally {
+      if (pfCtrl === ctrl) pfCtrl = null;
+    }
+  }
+
+  // 网格被清空（切视图、切相册、刷新）时调用：排队中的直接丢，在途的 abort，发出去的 blob 全部回收。
+  // 得和「清空网格」成对出现，所以只在清网格那几处调用。
+  function dlCancelAll() {
+    dlEpoch++;
+    dlQueue.length = 0;
+    for (const ctrl of dlInflight) ctrl.abort();
+    // dlActive 不在这里清零：在途请求会在自己的 finally 里还回并发位，
+    // 直接清零的话，abort 陆续回来时会把计数减成负数，队列从此不再前进
+    for (const url of dlBlobs) URL.revokeObjectURL(url);
+    dlBlobs.clear();
+    if (dlIO) dlIO.disconnect();
+  }
+
   // thumbN：缩略图边长，0 表示取原图。由调用方算一次传进来 ——
   // renderGridItem 是在循环里逐张 append 的，若在这里现算会反复触发同步布局
   function renderGridItem(it, mode, thumbN) {
@@ -2834,7 +3179,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 原图比 N 小时 crop 缩不动、原样返回（已实测不会放大），所以小图是安全的。
     const useThumb = !!thumbN && !/\.(svg|ico)$/i.test(it.key);
     const img = document.createElement('img');
-    img.loading = 'lazy';
+    img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
     // 必须先挂事件再赋 src：缓存命中时 load 可能在监听器挂上之前就派发完了
     img.onload = () => fig.classList.remove('ph');
@@ -2843,7 +3188,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    img.src = useThumb ? rawUrl + '?imageMogr2/crop/' + thumbN + 'x' + thumbN + '/gravity/center' : rawUrl;
+    // 下载交给下载器：它自己决定是流式自取（有百分比与增量显形）还是退回原生加载
+    dlLoad({
+      fig, img, epoch: dlEpoch,
+      url: useThumb ? thumbUrl(rawUrl, it.key, thumbN) : rawUrl,
+      rawUrl, thumb: useThumb,
+      bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
+    });
+    // 悬停意图：停够一会儿就预取原图，点开大图时正好命中缓存（见 pfHover）
+    fig.addEventListener('mouseenter', () => pfHover(it.key));
+    fig.addEventListener('mouseleave', pfCancel);
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     const name = it.key.split('/').pop();
     const cap = document.createElement('figcaption');
@@ -2935,6 +3289,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // ---------- 灯箱 ----------
   let lightboxItem = null;
+  let lightboxJob = null; // 灯箱大图当前那次下载（关灯箱时掐掉）
 
   function updateLightboxPublicBtn() {
     if (!lightboxItem) return;
@@ -2949,7 +3304,19 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   function openLightbox(item) {
     lightboxItem = item;
     const url = publicUrl(item.key);
-    $('lightboxImg').src = url;
+    // 原图走同一套流式下载：几 MB 的大图是全站最需要进度的地方。
+    // 先把 src 清掉，免得新图还没到就先行显示上一张（灯箱的 img 会记住上次的图）。
+    if (lightboxJob) { // 上一次还没收干净（连点两张）：连它的 blob 一起收掉，别留在集合里
+      lightboxJob.cancelled = true;
+      if (lightboxJob.ctrl) lightboxJob.ctrl.abort();
+      if (lightboxJob.blobUrl) { dlBlobs.delete(lightboxJob.blobUrl); URL.revokeObjectURL(lightboxJob.blobUrl); }
+    }
+    pfCancel(); // 预取和这次下载是同一个 URL，别让它俩并行各下一遍
+    const img = $('lightboxImg');
+    img.removeAttribute('src');
+    $('lightboxDl').hidden = true;
+    lightboxJob = { img, url, rawUrl: url, thumb: false, epoch: dlEpoch, bytes: 0, total: 0, pct: 0, started: false, blobUrl: null };
+    dlStream(lightboxJob, dlBoxSink(lightboxJob)).catch(() => {});
     $('lightboxName').textContent = item.key;
     document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
       b.onclick = () => copyText(makeLinks(url, item.key.split('/').pop())[b.dataset.fmt]);
@@ -2963,6 +3330,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   function closeLightbox() {
+    // 关灯箱就别让大图继续下了：几 MB 的东西，用户已经不想看了
+    if (lightboxJob) {
+      lightboxJob.cancelled = true; // 正在等解码的那次换帧也得作废（见 dlSwap 的注释）
+      if (lightboxJob.ctrl) lightboxJob.ctrl.abort();
+      if (lightboxJob.blobUrl) { dlBlobs.delete(lightboxJob.blobUrl); URL.revokeObjectURL(lightboxJob.blobUrl); }
+      lightboxJob = null;
+    }
+    $('lightboxDl').hidden = true;
     $('lightbox').hidden = true;
     lightboxItem = null;
   }
@@ -3014,6 +3389,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     cfg.format = $('setFormat').value;
     tokenCache = null;
     invalidateAlbumTree();
+    dlOk = null; // 换了域名就重新判一次能不能自取（CORS 是域名级的，新域名可能是另一回事）
     saveSettings();
     toast('设置已保存');
     closeSettings();
