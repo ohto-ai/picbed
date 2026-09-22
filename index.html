@@ -74,6 +74,12 @@ html, body { margin: 0; padding: 0; }
 /* 底色放在 html 上、body 保持透明：这样 body::before 的光晕（z-index:-1）
    才会落在画布底色之上，而不是被 body 自己的背景盖住 */
 html { background: var(--bg); }
+/* 藏掉页面滚动条：滚轮、触控板、空格键照常滚，只是不再画右侧那条槽。
+   矮视口里骨架总归会顶出一点滚动范围，画出来就是一条滚不出任何内容的滚动条。
+   注意 ::-webkit-scrollbar 一旦接管就不再占宽度：网格会多出这 15px，
+   骨架按 clientWidth 现算，会自己跟上。 */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
 body {
   background: transparent;
   color: var(--text);
@@ -911,33 +917,77 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   const GRID_GAP = 12;       // .grid 的 gap
   const GRID_TILE_MIN = 150; // .grid 的 minmax(150px, 1fr)
 
-  // 当前布局下每个格子的实际宽度（CSS 像素）
-  function gridTileSize() {
+  // 当前布局下网格的列数
+  function gridCols() {
     const w = $('galleryGrid').clientWidth;
     if (!w) return 0; // 布局未就绪或元素不可见
-    const cols = Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
+    return Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
+  }
+
+  // 当前布局下每个格子的实际宽度（CSS 像素）
+  function gridTileSize() {
+    const cols = gridCols();
+    if (!cols) return 0;
+    const w = $('galleryGrid').clientWidth;
     return (w - (cols - 1) * GRID_GAP) / cols;
   }
 
-  // 骨架数量按可视区域算：刚好铺满一屏，骨架自己撑不出滚动条。
-  const SK_CHROME_H = 32;  // 卡片标题条(.sk-cap 10px + 上下 margin 20px) + 上下边框 2px
+  // 骨架要铺满一屏，又必须自己不撑出滚动条 —— 而这个「一屏」只能量、不能算：
+  // 格子宽度是分数像素、卡片带边框、网格下方还压着 .gallery-more 的间距与 .wrap 的 64px 底衬，
+  // 估算只要多算几像素，「视口刚好容纳整数层」时骨架就顶出一条滚动条来。
+  // 所以铺的时候按估算来（一次到位，够快），末尾按实测撤整层（够准）。
+  const SK_CHROME_H = 32;  // 卡片标题条(.sk-cap 10px + 上下 margin 20px) + 上下边框 2px；只喂估算，量偏了有实测兜底
   const SK_MAX = 60;       // 上限，防止超长屏上铺出几百个节点
+  const SK_ROWS_MIN = 1;   // 层数下限：矮视口里宁可少铺一层也不冒滚动条；连一层都放不下才认输
+  const SK_COUNT_FALLBACK = 12; // 量不到宽度时的保守数量
   let gridLoaderSeq = 0;
   let gridLoaderOwner = 0;
 
-  function skeletonCount() {
-    const grid = $('galleryGrid');
-    const w = grid.clientWidth;
+  // 估算层数：只按「填满视口」算，不算网格下方的内容 —— 宁可多铺一层，
+  // 多出来的那层会被 trimSkeleton 撤掉；估少了才吃亏，屏幕底部会空一块。
+  function skeletonRows() {
     const tileW = gridTileSize();
-    if (!w || !tileW) return 12; // 布局尚未就绪或元素不可见，退回一个保守值
-    const cols = Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
-    const top = grid.getBoundingClientRect().top;
-    const more = document.querySelector('.gallery-more');
-    const moreH = more ? more.offsetHeight + 16 : 0; // 网格下方的「加载更多」也要留位
-    const availH = window.innerHeight - top - moreH - 12; // 12px 呼吸余量
+    if (!tileW) return SK_ROWS_MIN;
+    const availH = window.innerHeight - $('galleryGrid').getBoundingClientRect().top;
     const rowH = tileW + SK_CHROME_H + GRID_GAP; // 图片区是正方形，宽即高
-    const rows = Math.max(2, Math.floor((availH + GRID_GAP) / rowH));
-    return Math.min(SK_MAX, cols * rows);
+    return Math.max(SK_ROWS_MIN, Math.floor((availH + GRID_GAP) / rowH));
+  }
+
+  function skeletonTile() {
+    const tile = document.createElement('div');
+    tile.className = 'sk-tile';
+    const im = document.createElement('div');
+    im.className = 'sk-img';
+    const cap = document.createElement('div');
+    cap.className = 'sk-cap';
+    tile.append(im, cap);
+    return tile;
+  }
+
+  // 实测收尾：整层整层往下撤，直到页面不再出现纵向滚动条。
+  // 判据直接用 scrollHeight/clientHeight，而不是「网格底边 + 手写的预留量」：
+  // 网格下方还有什么（加载更多、.wrap 底衬、以后的页脚）由 DOM 说了算，滚动条本来就是这么冒出来的。
+  function trimSkeleton(grid, cols) {
+    const doc = document.documentElement;
+    let tiles = grid.querySelectorAll('.sk-tile');
+    // 循环体一次撤一整层：读一次 scrollHeight 就要强制一次布局，逐格试探不如整层跳
+    while (tiles.length > cols * SK_ROWS_MIN && doc.scrollHeight > doc.clientHeight) {
+      const keep = tiles.length - cols;
+      for (let i = tiles.length - 1; i >= keep; i--) tiles[i].remove();
+      tiles = grid.querySelectorAll('.sk-tile');
+    }
+  }
+
+  function fillSkeleton() {
+    const grid = $('galleryGrid');
+    const cols = gridCols();
+    if (!cols) { // 量不到宽度（视图还没就绪）：铺个保守数量就收手，不做实测
+      for (let i = 0; i < SK_COUNT_FALLBACK; i++) grid.appendChild(skeletonTile());
+      return;
+    }
+    const n = Math.min(SK_MAX, cols * skeletonRows());
+    for (let i = 0; i < n; i++) grid.appendChild(skeletonTile());
+    trimSkeleton(grid, cols);
   }
 
   // 缩略图边长 = 格子实际宽度 × 屏幕像素比。
@@ -969,19 +1019,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('galleryCount').hidden = true;
     const grid = $('galleryGrid');
     // 已经有骨架在屏幕上（上一次 reset 还没收尾）：沿用即可，不重复铺
-    if (o.skeleton && !grid.querySelector('.sk-tile')) {
-      const n = skeletonCount();
-      for (let i = 0; i < n; i++) {
-        const tile = document.createElement('div');
-        tile.className = 'sk-tile';
-        const im = document.createElement('div');
-        im.className = 'sk-img';
-        const cap = document.createElement('div');
-        cap.className = 'sk-cap';
-        tile.append(im, cap);
-        grid.appendChild(tile); // 只追加，永不清空网格
-      }
-    }
+    if (o.skeleton && !grid.querySelector('.sk-tile')) fillSkeleton(); // 只追加，永不清空网格
     return seq;
   }
 
