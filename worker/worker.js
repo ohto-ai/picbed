@@ -1,5 +1,5 @@
 /**
- * PicBed Worker — 为图床签发 COS 临时密钥（STS）+ 远程图片转存
+ * OhtoAi 图床 Worker — 为图床签发 COS 临时密钥（STS）+ 远程图片转存
  *
  * 部署：cd worker && wrangler deploy
  * 密钥通过 `wrangler secret put` 配置，绝不写进代码：

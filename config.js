@@ -1,4 +1,4 @@
-// PicBed 站点配置：修改后推送到 GitHub 即可生效
+// OhtoAi 图床站点配置：修改后推送到 GitHub 即可生效
 // 页面上「设置」里修改的项会存到浏览器本地，优先级高于这里
 window.PICBED_CONFIG = {
   // 必填：Cloudflare Worker 地址（部署完 Worker 后填，形如 https://picbed-worker.xxx.workers.dev）

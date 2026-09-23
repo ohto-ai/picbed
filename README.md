@@ -1,4 +1,4 @@
-# PicBed 图床
+# OhtoAi 图床
 
 腾讯云 COS + GitHub Pages + Cloudflare Worker 的个人免费图床：
 
@@ -55,6 +55,7 @@ picbed/
 
 1. 打开 [腾讯云 API 密钥管理](https://console.cloud.tencent.com/cam/capi) 新建密钥，记下 SecretId / SecretKey（直接用主账号密钥的话到这一步即可）
 2. 更安全的做法是子账号：
+
    - CAM → **策略 → 新建自定义策略 → 按策略语法创建（空白模板）**，名称随意（如 `PicbedWorker`），粘贴下方 JSON
    - CAM → **用户 → 新建用户 → 自定义创建**，访问方式只勾选「编程访问」，创建完成后立即保存 SecretId / SecretKey（只显示一次）
    - 给该子账号「关联策略」，勾选刚创建的 `PicbedWorker`
@@ -94,13 +95,13 @@ picbed/
 
 COS 控制台 → 存储桶 `album-1255316209` → **安全管理 → 跨域访问 CORS 设置** → 添加规则：
 
-| 项 | 值 |
-|---|---|
-| 来源 Origin | `*`（或填你的 Pages 域名） |
-| 操作 Methods | GET、POST、PUT、HEAD、DELETE |
-| Allow-Headers | `*` |
+| 项             | 值                                                 |
+| -------------- | -------------------------------------------------- |
+| 来源 Origin    | `*`（或填你的 Pages 域名）                       |
+| 操作 Methods   | GET、POST、PUT、HEAD、DELETE                       |
+| Allow-Headers  | `*`                                              |
 | Expose-Headers | `ETag`、`Content-Length`、`x-cos-request-id` |
-| 超时 Max-Age | 600 |
+| 超时 Max-Age   | 600                                                |
 
 ### 三、部署 Worker（签名服务）
 
@@ -118,12 +119,12 @@ wrangler deploy
 
 Worker 提供的接口：
 
-| 接口 | 需要密码 | 说明 |
-|---|---|---|
-| `POST/GET /token` | 是 | 签发 30 分钟、仅限 `PREFIX/` 目录的 COS 临时密钥 |
-| `POST /url` | 是 | 抓取远程图片并转存（10MB 上限） |
-| `GET /list` | 是 | 列出 `PREFIX/` 下全部对象，前端据此构建相册目录树 |
-| `GET /public` | 否 | 游客用：列出 `PREFIX/_picbed/public/` 下的公开图片与相册结构 |
+| 接口                | 需要密码 | 说明                                                          |
+| ------------------- | -------- | ------------------------------------------------------------- |
+| `POST/GET /token` | 是       | 签发 30 分钟、仅限`PREFIX/` 目录的 COS 临时密钥             |
+| `POST /url`       | 是       | 抓取远程图片并转存（10MB 上限）                               |
+| `GET /list`       | 是       | 列出`PREFIX/` 下全部对象，前端据此构建相册目录树            |
+| `GET /public`     | 否       | 游客用：列出`PREFIX/_picbed/public/` 下的公开图片与相册结构 |
 
 ### 四、部署前端到 GitHub Pages
 
@@ -137,14 +138,14 @@ Worker 提供的接口：
 
 图床区 → **腾讯云COS v5**：
 
-| 项 | 值 |
-|---|---|
+| 项                   | 值                                   |
+| -------------------- | ------------------------------------ |
 | SecretId / SecretKey | 你的腾讯云密钥（长期密钥，只存本机） |
-| Bucket | `album-1255316209` |
-| AppId | `1255316209` |
-| 存储区域 | `ap-shanghai` |
-| 存储路径 | `img/` |
-| 自定义域名 | `https://album.ohtoai.top` |
+| Bucket               | `album-1255316209`                 |
+| AppId                | `1255316209`                       |
+| 存储区域             | `ap-shanghai`                      |
+| 存储路径             | `img/`                             |
+| 自定义域名           | `https://album.ohtoai.top`         |
 
 ### 六、证书自动续期（`album.ohtoai.top`）
 
@@ -183,18 +184,17 @@ Worker 提供的接口：
    > 若策略编辑器里搜不到上面的 `cos:` action（接口较新），可暂时改用 `name/cos:*`。
    >
    > 如果子账号之前已按旧版策略创建过（缺 `ssl:DescribeCertificates` / `ssl:DeleteCertificate`），在策略列表里编辑该策略补上这两个 action 即可，无需重建子账号。
-
+   >
 3. **配置 GitHub Secrets**：仓库 → Settings → Secrets and variables → Actions，新增 4 个 secret：
 
-   | Secret | 值 |
-   |---|---|
-   | `CF_API_TOKEN` | 第 1 步的 Cloudflare API Token |
-   | `CF_ZONE_ID` | `ohtoai.top` 的 Zone ID |
-   | `TENCENT_SECRET_ID` | 第 2 步子账号的 SecretId |
-   | `TENCENT_SECRET_KEY` | 第 2 步子账号的 SecretKey |
+   | Secret                 | 值                             |
+   | ---------------------- | ------------------------------ |
+   | `CF_API_TOKEN`       | 第 1 步的 Cloudflare API Token |
+   | `CF_ZONE_ID`         | `ohtoai.top` 的 Zone ID      |
+   | `TENCENT_SECRET_ID`  | 第 2 步子账号的 SecretId       |
+   | `TENCENT_SECRET_KEY` | 第 2 步子账号的 SecretKey      |
 
    （可选）加一个变量 `ACME_EMAIL` 作为 Let's Encrypt 注册邮箱，默认 `noreply@ohtoai.top`。
-
 4. **测试**：Actions → `自动续期证书并部署到腾讯云 COS` → Run workflow，勾选「强制重新签发」跑一次。日志三步全绿后，到 [SSL 证书管理](https://console.cloud.tencent.com/ssl) 和 COS 桶「域名与传输管理」里确认新证书已就位。
 
 注意事项：
@@ -256,17 +256,17 @@ Worker 提供的接口：
 
 ## 常见问题
 
-| 问题 | 原因 / 解决 |
-|---|---|
-| 上传报 CORS 错误 | 没做第二步的 CORS 配置 |
-| 403 / 密码错误 | 页面密码与 Worker 的 `PICBED_PASSWORD` 不一致 |
-| 公开画廊报「加载失败」 | Worker 未更新到含 `/public` 接口的版本，重新 `wrangler deploy` |
-| 设为公开了游客还是看不到 | 刷新页面；公开列表不做缓存，但浏览器可能仍显示旧页面 |
-| 图片链接打不开 | 确认桶是公有读；若走 CDN 检查回源配置 |
-| 删了图片还能访问 | CDN 缓存未过期，可在 CDN 控制台刷新目录 |
-| 相册里图片加载比平时慢 | 多半是桶没开通图片处理，每张图都先发一次注定失败的缩略图请求再退回原图。要么开通 COS 图片处理，要么把 `config.js` 的 `thumb` 关掉 |
+| 问题                       | 原因 / 解决                                                                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 上传报 CORS 错误           | 没做第二步的 CORS 配置                                                                                                                                                          |
+| 403 / 密码错误             | 页面密码与 Worker 的`PICBED_PASSWORD` 不一致                                                                                                                                  |
+| 公开画廊报「加载失败」     | Worker 未更新到含`/public` 接口的版本，重新 `wrangler deploy`                                                                                                               |
+| 设为公开了游客还是看不到   | 刷新页面；公开列表不做缓存，但浏览器可能仍显示旧页面                                                                                                                            |
+| 图片链接打不开             | 确认桶是公有读；若走 CDN 检查回源配置                                                                                                                                           |
+| 删了图片还能访问           | CDN 缓存未过期，可在 CDN 控制台刷新目录                                                                                                                                         |
+| 相册里图片加载比平时慢     | 多半是桶没开通图片处理，每张图都先发一次注定失败的缩略图请求再退回原图。要么开通 COS 图片处理，要么把`config.js` 的 `thumb` 关掉                                            |
 | 想确认桶有没有开通图片处理 | 直接开一张图加参数：`https://<你的域名>/img/xxx.jpg?imageMogr2/crop/350x350/gravity/center`，返回居中正方形即已开通（返回原图说明没开通，前端会自动退回原图，不会显示不出来） |
-| 证书快过期了还没换 | 看 Actions 里 renew-cert 是否失败（失败会收到邮件），或手动 Run workflow 勾选「强制重新签发」 |
+| 证书快过期了还没换         | 看 Actions 里 renew-cert 是否失败（失败会收到邮件），或手动 Run workflow 勾选「强制重新签发」                                                                                   |
 
 ## 成本与安全
 

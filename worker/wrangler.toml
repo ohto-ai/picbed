@@ -1,4 +1,4 @@
-# PicBed Worker 配置
+# OhtoAi 图床 Worker 配置
 name = "picbed-worker"
 main = "worker.js"
 compatibility_date = "2025-09-01"
