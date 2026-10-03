@@ -679,7 +679,15 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <span id="bulkCount"></span>
     <span class="gallery-spacer"></span>
     <button id="bulkMoveBtn" class="btn small"><svg class="ic"><use href="#i-move"/></svg><span class="lbl">移动到相册</span></button>
-    <button id="bulkPublicBtn" class="btn small"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">设为公开</span></button>
+    <select id="bulkRating" class="btn small" title="批量改分级">
+      <option value="">改分级…</option>
+      <option value="unspecified">未分类（不进相册）</option>
+      <option value="G">G</option>
+      <option value="R12">R12</option>
+      <option value="R15">R15</option>
+      <option value="R18">R18</option>
+    </select>
+    <button id="bulkPublicBtn" class="btn small"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">隐藏</span></button>
     <button id="bulkDeleteBtn" class="btn small danger"><svg class="ic"><use href="#i-trash"/></svg><span class="lbl">批量删除</span></button>
     <button id="bulkCancelBtn" class="btn small ghost">取消选择</button>
   </div>
@@ -809,7 +817,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         <button class="btn small" data-fmt="url"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">URL</span></button>
         <button class="btn small" data-fmt="markdown"><svg class="ic"><use href="#i-md"/></svg><span class="lbl">Markdown</span></button>
         <button class="btn small" data-fmt="html"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">HTML</span></button>
-        <button class="btn small" id="togglePublicBtn"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">设为公开</span></button>
+        <label class="btn small admin-only" id="lightboxRatingWrap" title="分级只影响相册里的陈列，不影响直链">分级
+          <select id="lightboxRating" style="background:transparent;border:0;color:inherit;font:inherit;padding:0 2px;outline:none;">
+            <option value="unspecified">未分类</option>
+            <option value="G">G</option>
+            <option value="R12">R12</option>
+            <option value="R15">R15</option>
+            <option value="R18">R18</option>
+          </select>
+        </label>
+        <button class="btn small" id="togglePublicBtn"><svg class="ic"><use href="#i-globe"/></svg><span class="lbl">隐藏</span></button>
         <button class="btn small danger" id="deleteBtn"><svg class="ic"><use href="#i-trash"/></svg><span class="lbl">删除</span></button>
       </div>
     </div>
@@ -1243,7 +1260,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 拿原图回 200，那样「缩略图取不到就退回原图」的判断永远不会触发。
   const THUMB_SIZE = 512;                        // 与网格方格子对应（DPR2 下约覆盖 256px 的格子）
   const THUMB_QUALITY = 0.82;
-  const THUMB_MAX_SRC_BYTES = 20 * 1024 * 1024;  // 再大就不解码了：100MP 图解码后要上 GB 内存
+  // 超过这个大小就不在**上传时**生成缩略图（解码一张超大图可能吃掉几百 MB 内存，
+  // 而上传刚结束的页面正处于内存高峰）。取 48MB 是为了覆盖上传上限（50MB）——
+  // 之前写的 20MB 太小，导致 20MB 以上的图全都静默地没有缩略图。
+  // 真解不开也不会卡住上传：整段包在 try/catch 里，失败就退回原图。
+  const THUMB_MAX_SRC_BYTES = 48 * 1024 * 1024;
   const THUMB_SKIP_TYPES = ['image/svg+xml', 'image/x-icon']; // canvas 处理不了
 
   /**
@@ -1374,9 +1395,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       updateUploadFab();
     });
 
-    // 缩略图单独一步：生成或上传失败都不影响原图（D1 里 thumb_key 留空，网格会退回原图）
+    // 缩略图单独一步：生成或上传失败都不影响原图（D1 里 thumb_key 留空，网格会退回原图）。
+    // 但**要让用户知道**——否则他只会在相册里发现这张图加载特别慢，却不知道为什么。
+    status.textContent = '生成缩略图…';
     try {
-      status.textContent = '生成缩略图…';
       const blob = await makeThumb(file);
       if (blob) {
         await api('/api/images/' + image.id + '/thumb', {
@@ -1384,9 +1406,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
           headers: { 'content-type': blob.type || 'image/webp' },
           body: blob,
         });
+        item.thumbOk = true;
       }
     } catch (e) {
-      console.warn('[picbed] 缩略图没传成，这张图将直接用原图：', e.message || e);
+      console.warn('[picbed] 缩略图没传成：', e.message || e);
     }
     return image;
   }
@@ -1395,6 +1418,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (processing) return;
     processing = true;
     let uploadedAny = false;
+    let thumbFailed = 0;
     try {
       for (const item of queue) {
         if (item.done) continue;
@@ -1404,6 +1428,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
           const image = await uploadFile(item.file, item);
           item.done = true;
           uploadedAny = true;
+          if (!item.thumbOk) thumbFailed++;
           item.pct = 100;
           item.fill.style.width = '100%';
           item.status.textContent = '完成';
@@ -1433,6 +1458,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       processing = false;
       updateUploadFab();
       if (uploadedAny) loadGallery(true);
+      // 有图没生成缩略图就说一声：这些图在相册里会直接下载原图，慢得多。
+      // 不提示的话用户只会觉得「怎么有的图特别慢」，查不到原因。
+      if (thumbFailed) {
+        toast(`有 ${thumbFailed} 张图没生成缩略图（格式或尺寸不支持）。可用工具栏的「补缩略图」重试`, true);
+      }
     }
   }
 
@@ -3113,6 +3143,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
         '-',
         { icon: hidden ? 'globe' : 'moon', label: hidden ? '取消隐藏' : '隐藏', onClick: () => togglePublic(it.key) },
+        '-',
+        // 分级：只决定「进不进相册」，不影响直链
+        ...['G', 'R12', 'R15', 'R18', 'unspecified'].map((r) => ({
+          label: (it.rating === r ? '✓ ' : '') + '分级：' + (r === 'unspecified' ? '未分类' : r),
+          onClick: () => setRating(it.key, r),
+        })),
+        '-',
         { icon: 'move', label: '移动到相册…', onClick: () => moveImagesDialog([it.key]) },
         '-',
         { icon: 'trash', label: '删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
@@ -3132,8 +3169,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const btn = $('togglePublicBtn');
     setIcon(btn, hidden ? 'globe' : 'moon');
     setLabel(btn, hidden ? '取消隐藏' : '隐藏');
-    btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
-    btn.classList.toggle('on', on);
+    btn.title = hidden ? '已隐藏（点击取消隐藏）' : '隐藏（不进相册，直链仍可打开）';
+    btn.classList.toggle('on', !hidden);
   }
 
   function openLightbox(item) {
@@ -3160,7 +3197,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const isAdmin = view === 'admin';
     $('deleteBtn').hidden = !isAdmin;
     $('togglePublicBtn').hidden = !isAdmin;
-    if (isAdmin) updateLightboxPublicBtn();
+    $('lightboxRatingWrap').hidden = !isAdmin;
+    if (isAdmin) {
+      const row = itemsByKey.get(item.key);
+      $('lightboxRating').value = (row && row.rating) || 'unspecified';
+      updateLightboxPublicBtn();
+    }
     $('lightbox').hidden = false;
   }
 
@@ -3439,6 +3481,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   };
   $('togglePublicBtn').onclick = () => { if (lightboxItem) togglePublic(lightboxItem.key); };
+  $('lightboxRating').onchange = (e) => { if (lightboxItem) setRating(lightboxItem.key, e.target.value); };
+  $('bulkRating').onchange = (e) => {
+    const v = e.target.value;
+    e.target.value = ''; // 选完复位，避免它看起来像个「当前值」
+    if (v) bulkSetRating(v);
+  };
   $('lightboxClose').onclick = closeLightbox;
   $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) closeLightbox(); });
 
