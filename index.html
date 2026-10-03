@@ -671,9 +671,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <a id="repoLink" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>
       <svg class="ic ic-solid"><use href="#i-github"/></svg><span class="lbl">GitHub</span>
     </a>
-    <button id="settingsBtn" class="btn ghost admin-only">
-      <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
-    </button>
   </div>
 </header>
 <div class="wrap">
@@ -688,6 +685,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <button id="selectModeBtn" class="btn"><svg class="ic"><use href="#i-check-square"/></svg><span class="lbl">多选</span></button>
     <button id="refreshGallery" class="btn"><svg class="ic"><use href="#i-refresh"/></svg><span class="lbl">刷新</span></button>
     <button id="backfillThumbs" class="btn" title="给还没有缩略图的图片（比如从 COS 迁移过来的旧图）批量补上缩略图"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">补缩略图</span></button>
+    <!-- 设置按钮放在这排的最后：它以前在顶栏，而且是 admin-only，
+         一切换视图就整组右移，前面的标签跟着动。挪到这里就不影响顶栏布局了。 -->
+    <button id="settingsBtn" class="btn ghost">
+      <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
+    </button>
   </div>
   <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
@@ -1591,7 +1593,17 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // ---------- 上传状态面板（右下悬浮按钮） ----------
   // 视图模式：'admin' = 管理视图，'public' = 游客公开视图（见 switchView）
   // 本机已保存密码则直接进管理视图，否则默认展示公开画廊
-  let view = (cfg.password && cfg.api) ? 'admin' : 'public';
+  // 记住上次看的视图：刷新后回到原处，不再每次都被拽进「我的相册」。
+  // 首次访问（没记录）时，配了密码就直接进管理视图 —— 保持原来的习惯。
+  const VIEW_KEY = 'picbed_view';
+  let view = (() => {
+    let saved = '';
+    try { saved = localStorage.getItem(VIEW_KEY) || ''; } catch (e) { /* 隐私模式下可能读不到 */ }
+    const canAdmin = !!(cfg.password && cfg.api);
+    if (saved === 'admin') return canAdmin ? 'admin' : 'public';
+    if (saved === 'public') return 'public';
+    return canAdmin ? 'admin' : 'public';
+  })();
   let panelOpen = false;
 
   function openPanel() {
@@ -2299,6 +2311,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // ---------- 视图切换 ----------
   function switchView(next) {
     view = next;
+    // 记下来，刷新后停在同一个视图（见上面的 VIEW_KEY）
+    try { localStorage.setItem(VIEW_KEY, view); } catch (e) { /* 存不下就算了，不影响使用 */ }
     document.body.classList.toggle('view-public', view === 'public');
     $('tabPublic').classList.toggle('active', view === 'public');
     $('tabAdmin').classList.toggle('active', view === 'admin');
