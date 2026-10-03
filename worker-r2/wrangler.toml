@@ -9,10 +9,10 @@ name = "picbed-r2"                  # 不能与旧的 picbed-worker 重名
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# 加了自定义域名后，wrangler 默认会**关掉** workers.dev 地址 —— 而我们切换期间
-# 线上前端还指着那个地址，所以必须显式打开。等前端改用自定义域名、且缓存都过期后，
-# 可以把它删掉（少一个公开入口）。
-workers_dev = true
+# 只保留自定义域名这一个入口（picbed-worker.ohtoai.top）。
+# 注意：加了 [[routes]] 之后 wrangler 本来就会默认关掉 workers.dev，
+# 这里显式写出来是为了表明「这是有意的」，而不是哪次部署忘了开。
+workers_dev = false
 
 # ---------- 绑定 ----------
 
