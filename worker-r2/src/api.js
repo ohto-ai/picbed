@@ -396,6 +396,15 @@ function readPatch(body) {
     if (a === null) return { error: '_picbed 是保留目录名，不能用作相册' };
     patch.album = a;
   }
+  if ('filename' in body) {
+    // 只改展示用的文件名。r2_key 不可变，所以直链不受影响。
+    const f = String(body.filename == null ? '' : body.filename)
+      .replace(/[\u0000-\u001f]/g, '')
+      .trim()
+      .slice(0, 200);
+    if (!f) return { error: '文件名不能为空' };
+    patch.filename = f;
+  }
   return { patch };
 }
 

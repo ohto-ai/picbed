@@ -1660,7 +1660,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   let anchorFig = null; // Shift 连选的锚点卡片
 
   // 公开画廊（访客视图）：同样按相册名浏览，另外带一个分级档位
-  let publicAlbum = '';
+  // 相册进 URL：这样「某个相册」本身就可以被分享出去（见 albumShareUrl）。
+  // 分级档位同理，从 ?rating= 读。
+  let publicAlbum = new URLSearchParams(location.search).get('album') || '';
   let publicLoaded = 0;
   let publicPage = 1;
   let publicTotal = 0;
@@ -1674,6 +1676,26 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 注意它和 ?rating= 是两件事：rating 决定「列不列出来」，reveal 决定「糊不糊」。
   const COVERED_RATINGS = ['R15', 'R18'];
   const publicRevealAll = () => new URLSearchParams(location.search).get('reveal') === '1';
+
+  /** 把当前相册写回地址栏（replace=true 时不新增一条历史记录） */
+  function syncAlbumUrl(replace) {
+    const q = new URLSearchParams(location.search);
+    if (publicAlbum) q.set('album', publicAlbum); else q.delete('album');
+    const url = location.pathname + (q.toString() ? '?' + q : '');
+    // ⚠️ 必须写 window.history：本文件里有个同名局部变量 history（上传历史数组），
+    // 直接把浏览器那个 history 遮住了 —— 不写全名会报 "history.pushState is not a function"
+    if (replace) window.history.replaceState(null, '', url);
+    else window.history.pushState(null, '', url);
+  }
+
+  /** 某个相册的分享链接：指向公开画廊的那个相册，并带上当前的分级档位 */
+  function albumShareUrl(album) {
+    const q = new URLSearchParams(location.search);
+    if (album) q.set('album', album); else q.delete('album');
+    // 不把 reveal 带出去 —— 分享链接不该替对方决定「要不要显示敏感内容」
+    q.delete('reveal');
+    return location.origin + location.pathname + (q.toString() ? '?' + q : '');
+  }
 
   // ---------- 图片数据缓存 ----------
   // 网格里每一项都缓存**整行数据**（id / url / thumb_url / rating / is_hidden / album），
@@ -2126,7 +2148,18 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const cap = document.createElement('figcaption');
     cap.textContent = n ? `${name}（${n}）` : name;
     fig.append(iconEl, cap);
-    fig.onclick = () => { publicAlbum = album; loadPublicGallery(true); };
+    const open = () => { publicAlbum = album; syncAlbumUrl(false); loadPublicGallery(true); };
+    fig.onclick = open;
+    // 右键：相册本身是可以分享的（地址栏里带着 album 参数）
+    fig.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showCtxMenu(e.clientX, e.clientY, [
+        { icon: 'folder', label: '打开相册', onClick: open },
+        '-',
+        { icon: 'link', label: '复制相册链接', onClick: () => copyText(albumShareUrl(album)) },
+      ]);
+    });
     return fig;
   }
 
@@ -2175,6 +2208,41 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       toast('操作失败：' + errMsg(e), true);
     } finally {
       if (btn) btn.disabled = false;
+    }
+  }
+
+  /**
+   * 重命名图片：只改**展示用的文件名**。
+   * r2_key 是不可变的（这是「分享出去的链接永不失效」的前提），所以直链不会变 ——
+   * 这也是为什么它和「相册重命名」一样，属于纯元数据改动。
+   */
+  async function renameImage(key) {
+    const row = itemsByKey.get(key);
+    if (!row) return;
+    const raw = await promptDialog({
+      title: '重命名图片',
+      label: '新的文件名',
+      value: row.filename || '',
+      help: '只改显示用的名字。图片直链不会变，之前分享出去的链接照样有效。',
+      confirmText: '重命名',
+    });
+    if (raw === null) return;
+    const name = String(raw).trim();
+    if (!name || name === row.filename) return;
+
+    try {
+      const image = await patchImage(row.id, { filename: name });
+      if (image) Object.assign(row, image);
+      // 就地更新卡片上的名字：figcaption 里是「徽标 + 文本节点」，只换文本
+      const fig = document.querySelector(`#galleryGrid figure[data-key="${CSS.escape(key)}"]`);
+      const cap = fig && fig.querySelector('figcaption');
+      if (cap) {
+        [...cap.childNodes].forEach((n) => { if (n.nodeType === 3) n.remove(); });
+        cap.appendChild(document.createTextNode(name));
+      }
+      toast('已重命名（直链不变）');
+    } catch (e) {
+      toast('重命名失败：' + errMsg(e), true);
     }
   }
 
@@ -2386,6 +2454,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const go = (album) => {
       if (isPublic) {
         publicAlbum = album;
+        syncAlbumUrl(false); // 面包屑导航也写回地址栏，随时可复制当前路径
         loadPublicGallery(true);
       } else {
         galleryAlbum = album;
@@ -2511,6 +2580,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       e.stopPropagation();
       showCtxMenu(e.clientX, e.clientY, [
         { icon: 'folder', label: '打开相册', onClick: () => { galleryAlbum = album; loadGallery(true); } },
+        '-',
+        // 分享的是「公开画廊里的这个相册」—— 管理员自己看的是全部，访客只看得到可陈列的那些
+        { icon: 'link', label: '复制相册链接（给访客）', onClick: () => copyText(albumShareUrl(album)) },
         '-',
         { icon: 'pencil', label: '重命名 / 移动相册', onClick: () => renameAlbumDialog(album, name) },
         { icon: 'folder-move', label: '移动到其他位置', onClick: () => moveAlbumDialog(album, name) },
@@ -3233,6 +3305,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
           onClick: () => setRating(it.key, r),
         })),
         '-',
+        { icon: 'pencil', label: '重命名…', onClick: () => renameImage(it.key) },
         { icon: 'move', label: '移动到相册…', onClick: () => moveImagesDialog([it.key]) },
         '-',
         { icon: 'trash', label: '删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
@@ -3272,7 +3345,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('lightboxDl').hidden = true;
     lightboxJob = { img, url, rawUrl: url, thumb: false, epoch: dlEpoch, bytes: 0, total: 0, pct: 0, started: false, blobUrl: null };
     dlStream(lightboxJob, dlBoxSink(lightboxJob)).catch(() => {});
-    $('lightboxName').textContent = item.key;
+    // 显示原始文件名（键是时间戳+随机，对人不友好）；重命名后这里也会跟着变
+    $('lightboxName').textContent = item.filename || item.key;
     document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
       b.onclick = () => copyText(makeLinks(url, item.key.split('/').pop())[b.dataset.fmt]);
     });
@@ -3619,6 +3693,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     link.title = '查看源码仓库';
     link.hidden = false;
   }
+
+  // 浏览器前进/后退：相册现在是 URL 的一部分，所以要跟着走
+  window.addEventListener('popstate', () => {
+    if (view !== 'public') return; // 管理视图的相册不入地址栏，交给它自己
+    publicAlbum = new URLSearchParams(location.search).get('album') || '';
+    loadPublicGallery(true);
+  });
 
   renderHistory();
   updateUploadFab();

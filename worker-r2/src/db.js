@@ -84,6 +84,11 @@ export async function updateImages(env, ids, patch) {
     sets.push('album = ?');
     vals.push(patch.album);
   }
+  if (typeof patch.filename === 'string') {
+    // 同上：只是展示名，键与 URL 都不动
+    sets.push('filename = ?');
+    vals.push(patch.filename);
+  }
   if (!sets.length || !ids.length) return 0;
 
   sets.push('updated_at = ?');
