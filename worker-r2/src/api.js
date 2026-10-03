@@ -215,7 +215,11 @@ async function putObjectLimited(env, key, request, contentType, limit) {
 
   if (declared > 0) {
     const obj = await env.BUCKET.put(key, request.body, { httpMetadata });
-    const size = obj && obj.size != null ? obj.size : declared;
+    // ⚠️ 必须判空：put() 的返回类型是 R2Object | null（预条件不满足时给 null）。
+    // 不判的话会拿 declared 当成功继续往下走，调用方接着往 D1 写元数据 ——
+    // 结果就是「数据库里有记录、对象存储里没对象」这种不一致（线上出过一次）。
+    if (!obj) throw new Error('R2 put 返回 null，对象未写入');
+    const size = obj.size != null ? obj.size : declared;
     // 兜底：声明与实际不符时（或流被截断），以 R2 记录的为准
     if (size > limit) {
       await env.BUCKET.delete(key).catch(() => {});
@@ -228,7 +232,8 @@ async function putObjectLimited(env, key, request, contentType, limit) {
   const buf = await request.arrayBuffer();
   if (buf.byteLength > limit) throw new TooLargeError('actual too large');
   if (!buf.byteLength) throw new EmptyBodyError('empty');
-  await env.BUCKET.put(key, buf, { httpMetadata });
+  const obj2 = await env.BUCKET.put(key, buf, { httpMetadata });
+  if (!obj2) throw new Error('R2 put 返回 null，对象未写入');
   return buf.byteLength;
 }
 
