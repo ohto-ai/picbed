@@ -1,0 +1,71 @@
+# OhtoAi 图床 · R2 + D1 版后端
+#
+# 部署：cd worker-r2 && npx wrangler deploy
+# 这个 Worker 与旧的 worker/（签 COS 临时密钥那套）互不影响，可以并行部署。
+# 图片字节不经过这里 —— 直链走 R2 桶的自定义域名（img.ohtoai.top），
+# Worker 只负责：管理页、管理接口、相册列表接口。
+
+name = "picbed-r2"                  # 不能与旧的 picbed-worker 重名
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# ---------- 绑定 ----------
+
+[[r2_buckets]]
+binding = "BUCKET"                  # 代码里用 env.BUCKET 访问
+bucket_name = "picbed-images"
+
+[[d1_databases]]
+binding = "DB"                      # 代码里用 env.DB 访问
+database_name = "picbed-db"
+database_id = "0de6009c-2bbf-4a10-b961-140f6680b72b"          # 跑 `npx wrangler d1 create picbed-db`，把输出的 id 填这里
+
+# ---------- 配置项 ----------
+
+[vars]
+# 键前缀，与旧站保持一致（img/YYYY/MM/DD/…），迁移时键不用改
+PREFIX = "img"
+
+# 直链前缀：R2 桶自定义域名。接口用它拼出完整 URL 返回给前端
+IMAGE_BASE = "https://img.ohtoai.top"
+
+# 相册不带 ?rating= 参数时的默认档位：g / r12 / r15 / r18
+# 只列 G 是最保守的默认；想让访客默认就能看到更多，改成 r12 / r15 / r18
+DEFAULT_ALBUM_RATING = "g"
+
+# 相册接口的边缘缓存秒数。0 = 不缓存，相册永远最新（默认）
+# 访问量大了想省 D1 读取再调大（代价：最长这么久才更新）。需要 Cloudflare 免费额度之外的
+# 成本控制时才动它 —— 个人用量下相册接口本来就在免费额度内。
+LIST_CACHE_SECONDS = "0"
+
+# 图片直链的缓存秒数，上传时写进 R2 对象（边缘和浏览器都按它走）。
+# 键是不可变的（每次上传都生成新键），所以缓存越久越快，不会出现「换了内容还是旧图」。
+# 唯一代价：删除后最长要等这么久才彻底访问不到（隐藏不受影响——直链本来就开放）。
+# 注意：改这个值只影响之后上传的图；想对已有图统一改，用 Cloudflare 的 Cache Rule 覆盖 Edge TTL。
+IMAGE_CACHE_SECONDS = "86400"
+
+# 上传时的默认分级（管理页可以逐张覆盖）
+# unspecified = 上传后不进任何相册，必须去管理页选一个分级才会出现在相册里
+UPLOAD_DEFAULT_RATING = "unspecified"
+
+# 单文件大小上限，默认 50MB
+MAX_UPLOAD_BYTES = "52428800"
+
+# 允许跨域调用管理接口的前端来源（逗号分隔）。
+# 前端在 GitHub Pages 上、Worker 在另一个域名，属于跨域；管理接口默认不发光 CORS 头，
+# 只有这里列出的来源才放行。本地开发的那个 8765 端口是浏览器回归测试台用的。
+# 不带 credentials（不用 Cookie），密码靠 x-picbed-key 请求头显式携带。
+ALLOWED_ORIGINS = "https://picbed.ohtoai.top,https://ohto-ai.github.io,http://localhost:8765,http://127.0.0.1:8765"
+
+# ---------- 关于管理页 ----------
+# src/admin.html 由 index.js 直接 import，wrangler 内置规则里 .html 就是 Text 模块
+# （"**/*.txt", "**/*.html", "**/*.sql" → Text），所以这里不需要额外写 [[rules]]。
+# 好处：管理页跟着 Worker 一起部署，不用再建一个 Pages 项目，也没有跨域问题。
+
+# ---------- 自定义域名 ----------
+# ⚠️ 等前端迁移完成后再取消注释并重新 deploy。
+# 现在打开会抢走旧 COS Worker 的域名，旧站的上传 / 相册 / 公开画廊会当场全部失效。
+#
+# [[routes]]
+# pattern = "picbed-worker.ohtoai.top"
+# custom_domain = true

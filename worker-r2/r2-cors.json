@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://picbed.ohtoai.top",
+          "https://ohto-ai.github.io",
+          "http://localhost:8765",
+          "http://127.0.0.1:8765"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": ["Range", "If-None-Match", "If-Modified-Since"]
+      },
+      "exposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

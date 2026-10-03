@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图床管理 · OhtoAi</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1d2129;
+    --line: #262b36;
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #4f8cff;
+    --g: #3ecf8e;
+    --r12: #e3b341;
+    --r15: #f0883e;
+    --r18: #f85149;
+    --unspec: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  a { color: var(--accent); }
+  button, select, input[type="text"], input[type="password"] {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 10px;
+    outline: none;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: #3a4152; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--r18); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: rgba(15, 17, 21, .85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  main { max-width: 1240px; margin: 0 auto; padding: 20px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+
+  /* 未登录时的密码框 */
+  #gate { max-width: 420px; margin: 12vh auto; }
+  #gate h2 { margin: 0 0 6px; font-size: 18px; }
+  #gate .row { margin-top: 14px; }
+  #gate input { flex: 1; }
+
+  /* 上传区 */
+  #drop {
+    border: 1.5px dashed var(--line);
+    border-radius: 12px;
+    padding: 22px;
+    text-align: center;
+    color: var(--muted);
+    transition: border-color .15s, background .15s;
+  }
+  #drop.over { border-color: var(--accent); background: rgba(79, 140, 255, .06); color: var(--text); }
+  #uploads { margin-top: 12px; display: grid; gap: 6px; }
+  .up-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .up-item .bar { flex: 1; height: 4px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+  .up-item .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .1s; }
+  .up-item.ok .bar i { background: var(--g); }
+  .up-item.err .bar i { background: var(--r18); }
+
+  /* 列表 */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; white-space: nowrap; }
+  td.thumb img {
+    width: 64px; height: 64px; object-fit: cover; border-radius: 8px;
+    background: var(--panel-2); display: block;
+  }
+  .fn { font-weight: 500; word-break: break-all; }
+  .badges { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid; }
+  .badge.G { color: var(--g); border-color: var(--g); }
+  .badge.R12 { color: var(--r12); border-color: var(--r12); }
+  .badge.R15 { color: var(--r15); border-color: var(--r15); }
+  .badge.R18 { color: var(--r18); border-color: var(--r18); }
+  .badge.unspecified { color: var(--unspec); border-color: var(--unspec); }
+  .badge.hidden { color: var(--r18); border-color: var(--r18); background: rgba(248, 81, 73, .1); }
+  td.ops { white-space: nowrap; }
+  td.ops button { padding: 3px 8px; font-size: 12px; }
+  tr.picked { background: rgba(79, 140, 255, .07); }
+  .switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+
+  #pager { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 14px 0; }
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .2s;
+    max-width: 80vw;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-color: var(--r18); color: var(--r18); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>OhtoAi 图床 · 管理</h1>
+  <span class="muted small" id="hint">R2 + D1</span>
+  <span class="spacer"></span>
+  <button id="logout" hidden>退出</button>
+</header>
+
+<main>
+  <!-- 未登录 -->
+  <section id="gate" class="card">
+    <h2>输入管理密码</h2>
+    <p class="muted small">密码存在浏览器会话里（关掉标签页就没了），对应 Worker 的 <code>PICBED_PASSWORD</code>。</p>
+    <div class="row">
+      <input type="password" id="pwd" placeholder="管理密码" autocomplete="current-password">
+      <button class="primary" id="login">进入</button>
+    </div>
+    <p class="muted small" id="gate-msg" style="margin-bottom:0"></p>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="app" hidden>
+    <!-- 上传 -->
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <strong>上传</strong>
+        <span class="spacer" style="flex:1"></span>
+        <label class="small muted">分级
+          <select id="up-rating">
+            <option value="unspecified">unspecified（不进相册）</option>
+            <option value="G">G</option>
+            <option value="R12">R12</option>
+            <option value="R15">R15</option>
+            <option value="R18">R18</option>
+          </select>
+        </label>
+        <input type="text" id="up-album" placeholder="相册（可留空，默认按日期）" style="width:220px">
+        <button id="pick">选择文件</button>
+        <input type="file" id="file" multiple accept="image/*" hidden>
+      </div>
+      <div id="drop">把图片拖进来，或直接 Ctrl+V 粘贴 · 单张上限见 Worker 配置</div>
+      <div id="uploads"></div>
+    </div>
+
+    <!-- 筛选 -->
+    <div class="card">
+      <div class="row">
+        <select id="f-rating">
+          <option value="">全部分级</option>
+          <option value="G">G</option>
+          <option value="R12">R12</option>
+          <option value="R15">R15</option>
+          <option value="R18">R18</option>
+          <option value="unspecified">unspecified</option>
+        </select>
+        <select id="f-hidden">
+          <option value="">隐藏与否都看</option>
+          <option value="0">只看未隐藏</option>
+          <option value="1">只看已隐藏</option>
+        </select>
+        <input type="text" id="f-album" placeholder="相册（精确匹配）" style="width:200px" list="album-list">
+        <datalist id="album-list"></datalist>
+        <input type="text" id="f-q" placeholder="搜索文件名" style="width:180px">
+        <button class="primary" id="f-go">筛选</button>
+        <button id="f-reset">重置</button>
+        <span class="spacer" style="flex:1"></span>
+        <a id="preview" class="small" href="#" target="_blank" rel="noopener">预览相册 JSON ↗</a>
+      </div>
+    </div>
+
+    <!-- 批量操作（有勾选时才出现） -->
+    <div class="card" id="bulk" hidden>
+      <div class="row">
+        <span id="bulk-n" class="small"></span>
+        <span class="spacer" style="flex:1"></span>
+        <select id="bulk-rating">
+          <option value="">改成分级…</option>
+          <option value="G">G</option>
+          <option value="R12">R12</option>
+          <option value="R15">R15</option>
+          <option value="R18">R18</option>
+          <option value="unspecified">unspecified</option>
+        </select>
+        <button id="bulk-show">取消隐藏</button>
+        <button id="bulk-hide">隐藏</button>
+        <button class="danger" id="bulk-del">删除</button>
+        <button id="bulk-clear">清空选择</button>
+      </div>
+    </div>
+
+    <!-- 列表 -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:34px"><input type="checkbox" id="pick-all"></th>
+              <th style="width:80px">预览</th>
+              <th>文件</th>
+              <th style="width:130px">分级</th>
+              <th style="width:90px">隐藏</th>
+              <th style="width:150px">上传时间</th>
+              <th style="width:170px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+      <div id="pager">
+        <button id="prev">上一页</button>
+        <span class="muted small" id="page-info"></span>
+        <button id="next">下一页</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// 状态
+// ---------------------------------------------------------------------------
+
+const KEY_STORE = 'picbed_admin_key'; // 密码只存 sessionStorage：关掉标签页就没了
+const RATINGS = ['G', 'R12', 'R15', 'R18', 'unspecified'];
+
+const state = {
+  key: sessionStorage.getItem(KEY_STORE) || '',
+  page: 1,
+  pageSize: 50,
+  total: 0,
+  images: [],
+  selected: new Set(),
+  filters: { rating: '', hidden: '', q: '', album: '' },
+};
+
+const $ = (sel) => document.querySelector(sel);
+
+// ---------------------------------------------------------------------------
+// 小工具
+// ---------------------------------------------------------------------------
+
+const esc = (s) =>
+  String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function fmtSize(n) {
+  if (!n && n !== 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+let toastTimer = null;
+function toast(msg, isErr) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.className = ''), 3200);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('已复制');
+  } catch {
+    // 非 HTTPS 或没给剪贴板权限时的兜底
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('已复制');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 接口调用
+// ---------------------------------------------------------------------------
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { ...(opts.headers || {}), 'x-picbed-key': state.key },
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* 可能是空响应 */ }
+
+  if (res.status === 403 || res.status === 503) {
+    const err = new Error((data && data.error) || '鉴权失败');
+    err.auth = true;
+    err.notConfigured = res.status === 503; // 503 是「服务端没设密码」，不是密码错
+    throw err;
+  }
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// 登录
+// ---------------------------------------------------------------------------
+
+function showApp() {
+  $('#gate').hidden = true;
+  $('#app').hidden = false;
+  $('#logout').hidden = false;
+  loadAlbums();
+  load();
+}
+
+function showGate(msg) {
+  $('#gate').hidden = false;
+  $('#app').hidden = true;
+  $('#logout').hidden = true;
+  if (msg) $('#gate-msg').textContent = msg;
+}
+
+$('#login').addEventListener('click', async () => {
+  const pwd = $('#pwd').value;
+  if (!pwd) return;
+  state.key = pwd;
+  try {
+    await api('/api/images?pageSize=1'); // 试一次就知道密码对不对
+    sessionStorage.setItem(KEY_STORE, pwd);
+    $('#gate-msg').textContent = '';
+    showApp();
+  } catch (e) {
+    state.key = '';
+    $('#gate-msg').textContent = e.notConfigured
+      ? '服务端还没设 PICBED_PASSWORD。本地开发：在 worker-r2/ 下新建 .dev.vars，内容写 PICBED_PASSWORD="dev"，然后重启 wrangler dev'
+      : e.auth
+        ? '密码不对'
+        : '连不上：' + e.message;
+  }
+});
+$('#pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#login').click(); });
+
+$('#logout').addEventListener('click', () => {
+  sessionStorage.removeItem(KEY_STORE);
+  state.key = '';
+  location.reload();
+});
+
+// ---------------------------------------------------------------------------
+// 列表
+// ---------------------------------------------------------------------------
+
+function badgeOf(img) {
+  const out = [`<span class="badge ${img.rating}">${img.rating}</span>`];
+  // 「隐藏」和「未分类」在相册里都看不到，但原因不同 —— 分两个徽标，别混
+  if (img.is_hidden) out.push('<span class="badge hidden">已隐藏</span>');
+  if (img.rating === 'unspecified') out.push('<span class="badge unspecified">不进相册（未分类）</span>');
+  return out.join('');
+}
+
+function render() {
+  const list = $('#list');
+
+  if (!state.images.length) {
+    list.innerHTML = '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">没有符合条件的图片</td></tr>';
+  } else {
+    list.innerHTML = state.images.map((img) => {
+      const picked = state.selected.has(img.id);
+      const opts = RATINGS.map((r) => `<option value="${r}"${r === img.rating ? ' selected' : ''}>${r}</option>`).join('');
+      return `
+        <tr data-id="${img.id}" class="${picked ? 'picked' : ''}">
+          <td><input type="checkbox" class="pick"${picked ? ' checked' : ''}></td>
+          <td class="thumb">
+            <img src="${esc(img.url)}" data-key="${esc(img.key)}" loading="lazy" alt="" width="64" height="64">
+          </td>
+          <td>
+            <div class="fn">${esc(img.filename)}</div>
+            <div class="muted small">${esc(img.album)} · ${fmtSize(img.size)}</div>
+            <div class="badges">${badgeOf(img)}</div>
+          </td>
+          <td><select class="rating">${opts}</select></td>
+          <td>
+            <label class="switch">
+              <input type="checkbox" class="hid"${img.is_hidden ? ' checked' : ''}>
+              <span class="small">${img.is_hidden ? '已隐藏' : '正常'}</span>
+            </label>
+          </td>
+          <td class="muted small">${fmtTime(img.uploaded_at)}</td>
+          <td class="ops">
+            <button data-act="url" title="复制直链">URL</button>
+            <button data-act="md" title="复制 Markdown">MD</button>
+            <button class="danger" data-act="del" title="删除">删</button>
+          </td>
+        </tr>`;
+    }).join('');
+  }
+
+  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+  $('#page-info').textContent = `第 ${state.page} / ${pages} 页 · 共 ${state.total} 张`;
+  $('#prev').disabled = state.page <= 1;
+  $('#next').disabled = state.page >= pages;
+  $('#pick-all').checked = state.images.length > 0 && state.images.every((i) => state.selected.has(i.id));
+  renderBulk();
+
+  // 预览链接跟着分级筛选走，方便对照相册接口的行为
+  $('#preview').href = '/api/public/images?pageSize=20' + (state.filters.rating ? '&rating=' + encodeURIComponent(state.filters.rating) : '');
+}
+
+/** 勾选栏 */
+function renderBulk() {
+  const n = state.selected.size;
+  $('#bulk').hidden = n === 0;
+  $('#bulk-n').textContent = '已选 ' + n + ' 张';
+}
+
+async function load() {
+  const f = state.filters;
+  const qs = new URLSearchParams({ page: state.page, pageSize: state.pageSize });
+  if (f.rating) qs.set('rating', f.rating);
+  if (f.hidden !== '') qs.set('hidden', f.hidden);
+  if (f.q) qs.set('q', f.q);
+  if (f.album) qs.set('album', f.album);
+
+  try {
+    const data = await api('/api/images?' + qs.toString());
+    state.total = data.total;
+    state.images = data.images;
+    // 丢掉已经不在本页的勾选
+    const ids = new Set(state.images.map((i) => i.id));
+    [...state.selected].forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
+    render();
+  } catch (e) {
+    if (e.auth) return showGate('登录已失效，请重新输入密码');
+    toast('加载失败：' + e.message, true);
+  }
+}
+
+async function loadAlbums() {
+  try {
+    const data = await api('/api/albums');
+    $('#album-list').innerHTML = (data.albums || [])
+      .filter((a) => a.album)
+      .map((a) => `<option value="${esc(a.album)}">${esc(a.album)}（${a.n}）</option>`)
+      .join('');
+  } catch { /* 相册下拉拿不到不影响主流程 */ }
+}
+
+/** 就地改一张图的 is_hidden / rating，失败就把控件还原 */
+async function patchImage(id, patch, control) {
+  const img = state.images.find((i) => i.id === id);
+  const before = img ? { is_hidden: img.is_hidden, rating: img.rating } : null;
+  try {
+    const data = await api('/api/images/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (img) Object.assign(img, data.image);
+    render();
+    toast('已保存');
+  } catch (e) {
+    if (e.auth) return showGate('登录已失效，请重新输入密码');
+    toast('保存失败：' + e.message, true);
+    if (before) Object.assign(img, before);
+    render();
+  }
+}
+
+// 列表内的事件委托
+$('#list').addEventListener('change', (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (!tr) return;
+  const id = Number(tr.dataset.id);
+
+  if (e.target.classList.contains('pick')) {
+    if (e.target.checked) state.selected.add(id); else state.selected.delete(id);
+    tr.classList.toggle('picked', e.target.checked);
+    $('#pick-all').checked = state.images.every((i) => state.selected.has(i.id));
+    renderBulk();
+    return;
+  }
+  if (e.target.classList.contains('rating')) {
+    patchImage(id, { rating: e.target.value }, e.target);
+    return;
+  }
+  if (e.target.classList.contains('hid')) {
+    patchImage(id, { is_hidden: e.target.checked ? 1 : 0 }, e.target);
+  }
+});
+
+$('#list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const tr = btn.closest('tr[data-id]');
+  const id = Number(tr.dataset.id);
+  const img = state.images.find((i) => i.id === id);
+  if (!img) return;
+
+  if (btn.dataset.act === 'url') return copyText(img.url);
+  if (btn.dataset.act === 'md') return copyText(`![${img.filename}](${img.url})`);
+
+  if (btn.dataset.act === 'del') {
+    if (!confirm(`确定删除这张图？\n\n${img.filename}\n\nR2 里的文件和数据库记录都会删掉，不可恢复。`)) return;
+    try {
+      await api('/api/images/' + id, { method: 'DELETE' });
+      state.images = state.images.filter((i) => i.id !== id);
+      state.total = Math.max(0, state.total - 1);
+      state.selected.delete(id);
+      render();
+      toast('已删除');
+    } catch (err) {
+      if (err.auth) return showGate('登录已失效，请重新输入密码');
+      toast('删除失败：' + err.message, true);
+    }
+  }
+});
+
+// 图片加载失败时回落到 Worker 的 /i/ 路由：
+// 本地开发（wrangler dev）时 IMAGE_BASE 指向线上域名，本地新传的图在那边不存在，
+// 这条兜底让本地也能看到预览。error 事件不冒泡，所以用捕获阶段接。
+$('#list').addEventListener('error', (e) => {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || img.dataset.fb) return;
+  img.dataset.fb = '1';
+  img.src = '/i/' + img.dataset.key.split('/').map(encodeURIComponent).join('/');
+}, true);
+
+$('#pick-all').addEventListener('change', (e) => {
+  state.images.forEach((i) => { if (e.target.checked) state.selected.add(i.id); else state.selected.delete(i.id); });
+  render();
+});
+
+$('#prev').addEventListener('click', () => { if (state.page > 1) { state.page--; load(); } });
+$('#next').addEventListener('click', () => { state.page++; load(); });
+
+// ---------------------------------------------------------------------------
+// 筛选
+// ---------------------------------------------------------------------------
+
+$('#f-go').addEventListener('click', () => {
+  state.filters = {
+    rating: $('#f-rating').value,
+    hidden: $('#f-hidden').value,
+    q: $('#f-q').value.trim(),
+    album: $('#f-album').value.trim(),
+  };
+  state.page = 1;
+  load();
+});
+$('#f-reset').addEventListener('click', () => {
+  $('#f-rating').value = ''; $('#f-hidden').value = ''; $('#f-q').value = ''; $('#f-album').value = '';
+  $('#f-go').click();
+});
+$('#f-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#f-go').click(); });
+$('#f-album').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#f-go').click(); });
+
+// ---------------------------------------------------------------------------
+// 上传
+// ---------------------------------------------------------------------------
+
+/** 单文件上传：用 XHR 是为了拿到上传进度（fetch 读不到上传进度） */
+function uploadOne(file, item) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    // 分级与相册走 query 参数：中文相册名在 URL 里是 UTF-8 安全的，不用再手工编码
+    const qs = new URLSearchParams();
+    const album = $('#up-album').value.trim();
+    if (album) qs.set('album', album); // 留空则不传 → 服务端按日期归档
+    const rating = $('#up-rating').value;
+    if (rating) qs.set('rating', rating);
+
+    xhr.open('POST', '/api/upload' + (qs.toString() ? '?' + qs : ''));
+    xhr.setRequestHeader('x-picbed-key', state.key);
+    xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
+    xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && item) item.setProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+        resolve(data);
+      } else {
+        let msg = 'HTTP ' + xhr.status;
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch { /* ignore */ }
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误'));
+    xhr.send(file);
+  });
+}
+
+// 每个文件一行进度
+const uploadItems = new Map();
+function makeItem(file) {
+  const el = document.createElement('div');
+  el.className = 'up-item';
+  el.innerHTML = `<span style="width:38%">${esc(file.name)}</span><span class="bar"><i></i></span><span class="muted" style="width:96px;text-align:right"></span>`;
+  const bar = el.querySelector('i');
+  const msg = el.querySelector('span:last-child');
+  $('#uploads').prepend(el);
+  const item = {
+    setProgress(p) { bar.style.width = Math.round(p * 100) + '%'; msg.textContent = Math.round(p * 100) + '%'; },
+    ok(text) { el.classList.add('ok'); bar.style.width = '100%'; msg.textContent = text || '完成'; },
+    err(text) { el.classList.add('err'); msg.textContent = text || '失败'; },
+    el,
+  };
+  return item;
+}
+
+let uploading = false;
+async function handleFiles(files) {
+  const list = [...files].filter((f) => f && f.size > 0);
+  if (!list.length) return;
+  if (uploading) return toast('上一批还在传，稍等', true);
+  uploading = true;
+
+  let okCount = 0;
+  for (const file of list) {
+    const item = makeItem(file);
+    try {
+      const data = await uploadOne(file, item);
+      item.ok('完成');
+      okCount++;
+      if (data.image) state.images.unshift(data.image);
+    } catch (e) {
+      item.err(e.message);
+      if (/密码|鉴权|fail closed|禁用/.test(e.message)) { uploading = false; return showGate('登录已失效，请重新输入密码'); }
+    }
+  }
+
+  uploading = false;
+  if (okCount) {
+    toast(`上传完成 ${okCount} 张`);
+    loadAlbums();
+    state.page = 1;
+    load();
+  }
+}
+
+$('#pick').addEventListener('click', () => $('#file').click());
+$('#file').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
+
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach((ev) =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((ev) =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+drop.addEventListener('click', () => $('#file').click());
+
+document.addEventListener('paste', (e) => {
+  if (!state.key) return;
+  const files = [...(e.clipboardData.files || [])];
+  if (files.length) { e.preventDefault(); handleFiles(files); }
+});
+
+// ---------------------------------------------------------------------------
+// 批量操作
+// ---------------------------------------------------------------------------
+
+async function bulk(payload, okMsg) {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  try {
+    await api('/api/images/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, ...payload }),
+    });
+    state.selected.clear();
+    toast(okMsg);
+    load();
+  } catch (e) {
+    if (e.auth) return showGate('登录已失效，请重新输入密码');
+    toast('操作失败：' + e.message, true);
+  }
+}
+
+$('#bulk-hide').addEventListener('click', () => bulk({ is_hidden: 1 }, '已隐藏'));
+$('#bulk-show').addEventListener('click', () => bulk({ is_hidden: 0 }, '已取消隐藏'));
+$('#bulk-rating').addEventListener('change', (e) => {
+  const v = e.target.value;
+  if (!v) return;
+  e.target.value = '';
+  bulk({ rating: v }, '已改为 ' + v);
+});
+$('#bulk-del').addEventListener('click', () => {
+  const n = state.selected.size;
+  if (!confirm(`确定删除选中的 ${n} 张图？\n\nR2 里的文件和数据库记录都会删掉，不可恢复。`)) return;
+  bulk({ delete: true }, '已删除 ' + n + ' 张');
+});
+$('#bulk-clear').addEventListener('click', () => { state.selected.clear(); render(); });
+
+// ---------------------------------------------------------------------------
+// 启动
+// ---------------------------------------------------------------------------
+
+if (state.key) {
+  api('/api/images?pageSize=1')
+    .then(showApp)
+    .catch(() => { sessionStorage.removeItem(KEY_STORE); state.key = ''; showGate(); });
+} else {
+  showGate();
+}
+</script>
+</body>
+</html>

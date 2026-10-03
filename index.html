@@ -664,6 +664,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <button id="newAlbumBtn" class="btn"><svg class="ic"><use href="#i-folder-plus"/></svg><span class="lbl">新建相册</span></button>
     <button id="selectModeBtn" class="btn"><svg class="ic"><use href="#i-check-square"/></svg><span class="lbl">多选</span></button>
     <button id="refreshGallery" class="btn"><svg class="ic"><use href="#i-refresh"/></svg><span class="lbl">刷新</span></button>
+    <button id="backfillThumbs" class="btn" title="给还没有缩略图的图片（比如从 COS 迁移过来的旧图）批量补上缩略图"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">补缩略图</span></button>
   </div>
   <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
 
@@ -709,6 +710,18 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <span class="gallery-spacer"></span>
     <button id="panelClose" class="panel-close" title="收起"><svg class="ic"><use href="#i-x"/></svg></button>
   </div>
+  <div style="display:flex;align-items:center;gap:8px;padding:0 12px 8px;font-size:12px;color:var(--muted);">
+    <label style="display:flex;align-items:center;gap:6px;">上传分级
+      <!-- 默认 unspecified = 旧版的「未公开」：不进任何相册，要手动设过分级才会出现在相册里 -->
+      <select id="uploadRating" style="padding:3px 6px;border-radius:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);">
+        <option value="unspecified">未分类（不进相册）</option>
+        <option value="G">G</option>
+        <option value="R12">R12</option>
+        <option value="R15">R15</option>
+        <option value="R18">R18</option>
+      </select>
+    </label>
+  </div>
   <div id="queue"></div>
   <div id="resultsSection" hidden>
     <div class="section-head">
@@ -731,14 +744,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 <div id="settingsDialog" class="dialog" hidden>
   <div class="dialog-box">
     <h2><svg class="ic"><use href="#i-sliders"/></svg>设置</h2>
-    <label class="field">Worker 地址 <span class="req">*</span>
-      <input id="setWorker" type="text" placeholder="https://picbed-worker.xxx.workers.dev">
+    <label class="field">后端地址 <span class="req">*</span>
+      <input id="setWorker" type="text" placeholder="https://picbed-r2.xxx.workers.dev">
     </label>
-    <label class="field">上传密码（可选，与 Worker 的 PICBED_PASSWORD 一致）
+    <label class="field">上传密码（可选，与后端的 PICBED_PASSWORD 一致）
       <input id="setPassword" type="password" placeholder="不设置密码请留空">
-    </label>
-    <label class="field">图片访问域名（可选，留空用 COS 默认域名）
-      <input id="setDomain" type="text" placeholder="https://album.ohtoai.top">
     </label>
     <label class="field">默认链接格式
       <select id="setFormat">
@@ -748,8 +758,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       </select>
     </label>
     <label class="field">故障诊断
-      <button id="probeBtn" class="btn small" type="button" style="margin-top:6px;">诊断 Worker 密钥的 COS 权限</button>
-      <pre id="probeResult" style="margin-top:6px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:11px;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-all;">尚未诊断</pre>
+      <button id="probeBtn" class="btn small" type="button" style="margin-top:6px;">测试后端连接</button>
+      <pre id="probeResult" style="margin-top:6px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:11px;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-all;">尚未测试</pre>
     </label>
     <div class="dialog-actions">
       <button id="saveSettings" class="btn primary">保存</button>
@@ -758,30 +768,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   </div>
 </div>
 
-<div id="dupDialog" class="dialog" hidden>
-  <div class="dialog-box">
-    <h2><svg class="ic"><use href="#i-alert"/></svg>文件冲突</h2>
-    <div id="dupPreview" class="dup-preview" hidden>
-      <div class="dup-side">
-        <img id="dupNewImg" alt="新文件">
-        <span>新文件（待上传）</span>
-      </div>
-      <span class="dup-arrow"><svg class="ic"><use href="#i-move"/></svg></span>
-      <div class="dup-side">
-        <img id="dupOldImg" alt="现有文件">
-        <span>现有文件</span>
-      </div>
-    </div>
-    <p id="dupCompare" class="dup-compare"></p>
-    <p id="dupMsg"></p>
-    <label class="check dup-apply"><input type="checkbox" id="dupApplyAll"> 对后续所有文件应用此选择</label>
-    <div class="dialog-actions">
-      <button id="dupOverwrite" class="btn primary">覆盖</button>
-      <button id="dupRename" class="btn">自动重命名</button>
-      <button id="dupSkip" class="btn ghost">跳过</button>
-    </div>
-  </div>
-</div>
 
 <div id="promptDialog" class="dialog" hidden>
   <div class="dialog-box">
@@ -835,16 +821,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 <div id="marquee" hidden></div>
 
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/cos-js-sdk-v5@1/dist/cos-js-sdk-v5.min.js"></script>
+<!-- 这里原本加载 cos-js-sdk-v5（浏览器直传 COS）。已迁移到 Cloudflare R2 + D1 后端，不再需要。 -->
 <script>
 (function () {
   'use strict';
 
   // ---------- 配置 ----------
   const DEFAULTS = {
-    worker: '', bucket: 'album-1255316209', region: 'ap-shanghai',
-    prefix: 'img', customDomain: '', maxKeys: 500,
-    format: 'url', password: '', thumb: false,
+    // api = 后端（Worker）地址；imageBase = 图片直链域名（R2 桶的自定义域名）
+    api: '', imageBase: '',
+    format: 'url', password: '',
     repo: '', // 源码仓库地址，填了就在顶栏给访客显示 GitHub 入口
   };
   let cfg = Object.assign({}, DEFAULTS, window.PICBED_CONFIG || {});
@@ -855,13 +841,18 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 旧版本存过 thumb:false 的话，留着会永远盖住 config.js —— 而工具栏的勾选框已经去掉，
     // 用户再也找不到地方改回来 —— 所以直接丢掉这个键
     delete saved.thumb;
+    // 旧版存的是 worker / customDomain（指向腾讯云 COS 那套）。它们会**盖住 config.js**，
+    // 留着的话新页面会一直去连旧 Worker —— 那份配置已经无效了，直接丢掉。
+    delete saved.worker;
+    delete saved.customDomain;
+    delete saved.bucket;
+    delete saved.region;
     cfg = Object.assign(cfg, saved);
   } catch (e) {}
 
   function saveSettings() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      worker: cfg.worker, password: cfg.password,
-      customDomain: cfg.customDomain, format: cfg.format,
+      api: cfg.api, password: cfg.password, format: cfg.format,
     }));
   }
 
@@ -1026,41 +1017,15 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     trimSkeleton(grid, cols);
   }
 
-  // 缩略图边长 = 格子实际宽度 × 屏幕像素比。
-  // 这里能直接乘、不留余量，是因为用的是 crop 而不是 thumbnail：
-  // 格子只显示居中的正方形（.grid img 是 aspect-ratio:1 + object-fit:cover），
-  // crop/NxN/gravity/center 裁出来的正好就是那一块，和显示区域一比一对应。
-  // （thumbnail 只能按长边限制，而正方形取的是短边，横向的图会白白多下 25%~44%）
-  const THUMB_DPR_CAP = 2;    // 屏幕像素比封顶 2x；3x 屏再多 2.25 倍像素，观感提升很小
-  const THUMB_STEP = 50;      // 量化到 50px 台阶：否则每个视口宽度都算出一个新 URL，缓存会被打散
-  const THUMB_MIN = 200;
-  const THUMB_MAX = 1000;
-  const THUMB_FALLBACK = 500; // 布局未就绪时的保守值
-
-  function thumbSize() {
-    const tile = gridTileSize();
-    if (!tile) return THUMB_FALLBACK;
-    const dpr = Math.min(window.devicePixelRatio || 1, THUMB_DPR_CAP);
-    const need = tile * dpr;
-    return Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.ceil(need / THUMB_STEP) * THUMB_STEP));
-  }
-
-  // 缩略图地址的唯一构造点：自家下载和原生加载必须拿到同一个字符串，
-  // 否则 fetch 与 <img> 会各打一次网络，那 30 天的 HTTP 缓存也白攒。
+  // 缩略图不再是「原图 + 查询参数」——那套依赖 COS 数据万象的服务端处理，R2 没有这个能力。
+  // 现在缩略图是上传时在浏览器里用 canvas 生成的独立对象，键存在数据库的 thumb_key 列，
+  // 接口直接把 thumb_url 返回给前端（见 renderGridItem）。
   //
-  // JPEG 带 /interlace/1 让服务端输出渐进式 JPEG（实测 SOF2），这是「加载多少显示多少」的关键：
-  // 截断的渐进式 JPEG 会渲染出整张模糊图，而不是半张。
-  // PNG 改成 WebP：实测裁切后的 PNG 缩略图比 JPEG 重 6~8 倍（350px 要 99~182KB，WebP q85 只要 9~22KB），
-  // 画质差在缩略图尺寸下看不出来（与原 PNG 逐像素平均差 1.7~2.4，满值 255）。
-  // 只动这两种扩展名 —— 其它格式没验过，万一不支持就是一次 400 + 退回原图，不值当。
-  // 已知取舍：WebP 截断状态下画不出东西，所以这些卡片不做增量显形（见 dlRun 里的 revealable），
-  // 另外若将来有真正带透明的 PNG，缩略图会丢掉透明（原图不受影响，灯箱照旧）。
-  function thumbUrl(rawUrl, key, thumbN) {
-    const base = rawUrl + '?imageMogr2/crop/' + thumbN + 'x' + thumbN + '/gravity/center';
-    if (/\.jpe?g$/i.test(key)) return base + '/interlace/1';
-    if (/\.png$/i.test(key)) return base + '/format/webp/quality/85';
-    return base;
-  }
+  // 尺寸在生成时就定死了（THUMB_SIZE = 512 的正方形），所以旧版那套
+  // 「按格子宽度 × DPR 动态算边长」的机制一并删掉了 —— 预先烘焙的图没法按视口变尺寸。
+  //
+  // 已知取舍：canvas 生成的是基线 WebP，不是渐进式，所以**缩略图卡片没有增量显形**
+  // （那是服务端编码能力）。进度条照常；原图的显形取决于原文件本身是不是渐进式。
 
   function showGridLoader(opts) {
     const o = opts || {};
@@ -1099,25 +1064,36 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     toast('已复制');
   }
 
-  function authHeaders() {
-    const h = { 'content-type': 'application/json' };
-    if (cfg.password) h['x-picbed-key'] = cfg.password;
-    return h;
-  }
+  // ---------- 后端接口 ----------
+  // 所有请求都走这里：自动带密码头、统一抛错。
+  // 错误对象上带 status 和 auth 两个标记，调用方据此决定是提示还是弹设置框。
+  async function api(path, opts) {
+    const o = opts || {};
+    const headers = Object.assign({}, o.headers);
+    if (cfg.password) headers['x-picbed-key'] = cfg.password;
+    const res = await fetch(cfg.api + path, Object.assign({}, o, { headers }));
 
-  function listHeaders() {
-    const h = {};
-    if (cfg.password) h['x-picbed-key'] = cfg.password;
-    return h;
-  }
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* 有些响应没有 JSON 体 */ }
 
-  function baseUrl() {
-    return (cfg.customDomain || `https://${cfg.bucket}.cos.${cfg.region}.myqcloud.com`).replace(/\/+$/, '');
+    if (!res.ok) {
+      const err = new Error((data && data.error) || ('HTTP ' + res.status));
+      err.status = res.status;
+      err.auth = res.status === 403 || res.status === 503; // 密码错 / 服务端没配密码
+      throw err;
+    }
+    return data;
   }
-  function publicUrl(key) { return `${baseUrl()}/${key}`; }
+  const apiSend = (path, method, body) =>
+    api(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+  // 图片直链：接口返回的 url / thumb_url 优先用；只有手上只有键时才用这里拼
+  function publicUrl(key) {
+    return String(cfg.imageBase || '').replace(/\/+$/, '') + '/' + key;
+  }
 
   function needWorker() {
-    if (cfg.worker) return true;
+    if (cfg.api) return true;
     openSettings();
     toast('请先在设置中填写 Worker 地址', true);
     return false;
@@ -1133,28 +1109,48 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
   };
 
-  function sanitizeSegment(seg) {
-    return String(seg || '').trim().replace(/[\\:*?"<>|]+/g, '_').replace(/^\.+$/, '');
+  // ---------- 相册名 ----------
+  // 相册现在是数据库里的一列，不再是键路径。这一套函数负责它的净化与拼接，
+  // 规则与 Worker 的 safeAlbum 保持一致（本地先挡一道，省得白跑一趟网络）。
+  // 键由服务端生成、且不可变，所以前端不再参与拼键。
+
+  function sanitizeAlbum(input) {
+    const segs = String(input || '').replace(/\\/g, '/').split('/')
+      .map((s) => s.trim())
+      .filter((s) => s && s !== '.' && s !== '..');
+    // _picbed 是保留名，判断前先剥掉前导的非字母数字（_picbed → picbed）
+    if (segs.some((s) => s.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase() === 'picbed')) return null;
+    return segs
+      .map((s) => s.replace(/[\\:*?"<>|\u0000-\u001f]/g, '_').replace(/^[._]+|[._]+$/g, '').slice(0, 60))
+      .filter(Boolean)
+      .join('/');
   }
 
-  // relPath 支持子目录（文件夹上传时保留目录结构）；prefix 指定上传目标相册（默认当前目录）
-  function makeKey(relPath, type, prefix) {
-    const parts = String(relPath || '').replace(/\\/g, '/').split('/').filter(Boolean).map(sanitizeSegment).filter(Boolean);
-    let name = parts.pop() || '';
-    if (!name || name === '_') name = 'image_' + Math.random().toString(36).slice(2, 8) + '.' + (TYPE_EXT_MAP[type] || 'bin');
-    return (prefix || galleryPrefix) + (parts.length ? parts.join('/') + '/' : '') + name;
+  /** 拼相册路径：父相册 + 子段 */
+  function albumJoin(parent, child) {
+    const a = String(parent || '').replace(/\/+$/, '');
+    const b = String(child || '').replace(/^\/+|\/+$/g, '');
+    return a && b ? a + '/' + b : (a || b);
+  }
+
+  /** 相册的父级（'' = 根） */
+  function albumParent(album) {
+    const i = String(album || '').lastIndexOf('/');
+    return i > 0 ? album.slice(0, i) : '';
+  }
+
+  /** 文件夹上传时，文件相对路径里的子目录要拼进相册名（保留目录结构） */
+  function relDirs(relPath) {
+    const parts = String(relPath || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    parts.pop(); // 去掉文件名
+    return parts.map((s) => s.replace(/[\\:*?"<>|\u0000-\u001f]/g, '_').replace(/^[._]+|[._]+$/g, '')).filter(Boolean).join('/');
   }
 
   function errMsg(e) {
     if (!e) return '未知错误';
     if (typeof e === 'string') return e;
     if (e.message) return e.message;
-    if (e.error) {
-      if (typeof e.error === 'string') return e.error;
-      if (e.error.Message) return e.error.Message;
-      if (e.error.Code) return 'COS 错误 ' + e.error.Code;
-    }
-    if (e.statusCode) return 'HTTP ' + e.statusCode;
+    if (e.status) return 'HTTP ' + e.status;
     try { return JSON.stringify(e); } catch (x) { return '未知错误'; }
   }
 
@@ -1163,42 +1159,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return IMAGE_EXTS.includes((f.name.split('.').pop() || '').toLowerCase());
   }
 
-  // ---------- COS SDK（临时密钥） ----------
-  let tokenCache = null;
-  async function fetchToken() {
-    const now = Date.now() / 1000;
-    if (tokenCache && tokenCache.expiredTime > now + 120) return tokenCache;
-    const res = await fetch(`${cfg.worker}/token`, { method: 'POST', headers: authHeaders() });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || '获取上传凭证失败');
-    tokenCache = data;
-    return data;
-  }
-
-  const cos = new COS({
-    getAuthorization(options, callback) {
-      fetchToken()
-        .then((d) => callback({
-          TmpSecretId: d.credentials.tmpSecretId,
-          TmpSecretKey: d.credentials.tmpSecretKey,
-          SecurityToken: d.credentials.sessionToken,
-          StartTime: Math.floor(Date.now() / 1000),
-          ExpiredTime: d.expiredTime,
-        }))
-        .catch((e) => {
-          toast(e.message, true);
-          if (String(e.message).includes('密码')) openSettings();
-          callback(null);
-        });
-    },
-  });
-
   // ---------- 上传 ----------
   const queue = [];
   let processing = false;
 
-  function addFiles(files, targetPrefix) {
+  // targetAlbum 不传就传进当前所在的相册（与旧版的「上传到当前目录」一致）
+  function addFiles(files, targetAlbum) {
     if (!needWorker()) return;
+    const base = targetAlbum === undefined || targetAlbum === null ? galleryAlbum : targetAlbum;
     let added = 0;
     let skippedNonImage = 0;
     let skippedTooBig = 0;
@@ -1206,13 +1174,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     for (const f of files) {
       if (!isImageFile(f)) { skippedNonImage++; continue; }
       if (f.size > 50 * 1024 * 1024) { skippedTooBig++; continue; }
-      // _picbed 为公开标记的保留命名空间，禁止上传进去
-      const rel = String(f.__relPath || f.name).replace(/\\/g, '/');
-      if (hasReservedSegment(rel.split('/').slice(0, -1).join('/')) || hasReservedSegment(galleryPrefix)) {
-        skippedReserved++;
-        continue;
-      }
-      enqueue(f, targetPrefix);
+      // 文件夹上传时把相对路径里的子目录并进相册名，保留目录结构
+      const album = albumJoin(base, relDirs(f.__relPath || f.name));
+      if (sanitizeAlbum(album) === null) { skippedReserved++; continue; } // 含保留段 _picbed
+      enqueue(f, album);
       added++;
     }
     if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
@@ -1269,7 +1234,100 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return [...((dt && dt.files) || [])];
   }
 
-  function enqueue(file, uploadPrefix) {
+  // ---------- 缩略图（浏览器端生成） ----------
+  // 免费方案里唯一可行的一条：Cloudflare Image Resizing 要付费，Workers 免费版 10ms CPU
+  // 也跑不动 WASM 编码。所以在**上传时**用 canvas 生成一张正方形缩略图，一起传到 R2。
+  // 缩略图是独立的 R2 对象、独立的 URL —— 不是给原图加查询参数：R2 会忽略未知查询参数、
+  // 拿原图回 200，那样「缩略图取不到就退回原图」的判断永远不会触发。
+  const THUMB_SIZE = 512;                        // 与网格方格子对应（DPR2 下约覆盖 256px 的格子）
+  const THUMB_QUALITY = 0.82;
+  const THUMB_MAX_SRC_BYTES = 20 * 1024 * 1024;  // 再大就不解码了：100MP 图解码后要上 GB 内存
+  const THUMB_SKIP_TYPES = ['image/svg+xml', 'image/x-icon']; // canvas 处理不了
+
+  /**
+   * 生成缩略图。**任何失败都返回 null** —— 缩略图是锦上添花，绝不能因此让原图传不上去。
+   *
+   * 用 <img> 而不是 createImageBitmap：前者默认按 EXIF 方向摆正，而
+   * createImageBitmap 的 imageOrientation:'from-image' 在部分 Safari 上是**被静默忽略**的，
+   * 那会生成一张躺倒的缩略图，比没有缩略图还糟。
+   */
+  async function makeThumb(file) {
+    const type = (file.type || '').toLowerCase();
+    if (THUMB_SKIP_TYPES.includes(type)) return null;
+    if (file.size > THUMB_MAX_SRC_BYTES) return null;
+
+    let url = null;
+    try {
+      url = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (!w || !h) return null;
+
+      // 居中正方裁切，和网格里的方格子一一对应（横竖图都不浪费像素）
+      const side = Math.min(w, h);
+      const sx = Math.floor((w - side) / 2);
+      const sy = Math.floor((h - side) / 2);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = THUMB_SIZE;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, THUMB_SIZE, THUMB_SIZE);
+
+      // 浏览器不支持 WebP 时 toBlob 会静默退回 PNG —— 一律以 blob.type 为准，别写死
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/webp', THUMB_QUALITY));
+      if (!blob) return null;
+      if (blob.size >= file.size) return null; // 比原图还大就没有意义
+      return blob;
+    } catch (e) {
+      return null; // 解不开的格式（例如 Chrome 里的 HEIC）就当没有缩略图
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
+  }
+
+  /** 上传时用的分级。默认 unspecified = 旧版的「未公开」：要手动设过分级才进相册 */
+  function currentUploadRating() {
+    const el = $('uploadRating');
+    return (el && el.value) || 'unspecified';
+  }
+
+  /**
+   * 单文件上传。用 XHR 而不是 fetch，是因为 fetch 读不到上传进度。
+   * 分级与相册走 query 参数（中文相册名在 URL 里天然安全，空串能表达「传到根目录」）。
+   */
+  function uploadOne(file, album, rating, onProgress) {
+    return new Promise((resolve, reject) => {
+      const qs = new URLSearchParams();
+      qs.set('album', album || '');
+      qs.set('rating', rating || 'unspecified');
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', cfg.api + '/api/upload?' + qs.toString());
+      if (cfg.password) xhr.setRequestHeader('x-picbed-key', cfg.password);
+      xhr.setRequestHeader('x-filename', encodeURIComponent(file.name)); // 头只能放 Latin-1，中文名要先编码
+      xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* 可能没有 JSON 体 */ }
+        if (xhr.status >= 200 && xhr.status < 300 && data && data.image) return resolve(data.image);
+        const err = new Error((data && data.error) || ('HTTP ' + xhr.status));
+        err.status = xhr.status;
+        err.auth = xhr.status === 403 || xhr.status === 503;
+        reject(err);
+      };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.send(file);
+    });
+  }
+
+  function enqueue(file, uploadAlbum) {
     const row = document.createElement('div');
     row.className = 'q-item';
     const thumb = document.createElement('img');
@@ -1297,74 +1355,59 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       thumb.onload = () => URL.revokeObjectURL(u);
     }
     $('queue').appendChild(row);
-    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0, prefix: uploadPrefix || null });
+    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0, album: uploadAlbum || null });
     updateUploadFab();
   }
 
-  async function uploadFile(file, item, dupCtx) {
-    const { fill, status, prefix } = item;
-    const relPath = file.__relPath || file.name;
-    let key = makeKey(relPath, file.type, prefix);
-    if ((await headP(key)).state === 'exists') {
-      let action = dupCtx.action;
-      if (!action) {
-        const res = await askDialog(`目标位置已有「${relPath}」，如何处理？`, { cancel: '跳过', file, oldKey: key });
-        action = res.action;
-        if (res.applyAll) dupCtx.action = action;
-      }
-      if (action === 'cancel') return { skipped: true };
-      if (action === 'rename') key = await autoRenameKey(key);
-    }
-    const ext = (file.name.split('.').pop() || '').toLowerCase();
-    return new Promise((resolve, reject) => {
-      cos.uploadFile({
-        Bucket: cfg.bucket,
-        Region: cfg.region,
-        Key: key,
-        Body: file,
-        ContentType: file.type || TYPE_BY_EXT[ext] || 'image/png',
-        onProgress(p) {
-          const pct = Math.min(100, Math.round((p.percent || 0) * 100));
-          item.pct = pct;
-          fill.style.width = pct + '%';
-          status.textContent = pct >= 100 ? '处理中…' : pct + '%';
-          updateUploadFab();
-        },
-      }, (err) => {
-        if (err) return reject(err);
-        resolve(publicUrl(key));
-      });
+  async function uploadFile(file, item) {
+    const { fill, status } = item;
+    // 文件夹上传时把相对路径里的子目录并进相册名，保留目录结构
+    const album = albumJoin(item.album || '', relDirs(file.__relPath || file.name));
+
+    const image = await uploadOne(file, album, currentUploadRating(), (p) => {
+      const pct = Math.min(100, Math.round(p * 100));
+      item.pct = pct;
+      fill.style.width = pct + '%';
+      status.textContent = pct >= 100 ? '处理中…' : pct + '%';
+      updateUploadFab();
     });
+
+    // 缩略图单独一步：生成或上传失败都不影响原图（D1 里 thumb_key 留空，网格会退回原图）
+    try {
+      status.textContent = '生成缩略图…';
+      const blob = await makeThumb(file);
+      if (blob) {
+        await api('/api/images/' + image.id + '/thumb', {
+          method: 'PUT',
+          headers: { 'content-type': blob.type || 'image/webp' },
+          body: blob,
+        });
+      }
+    } catch (e) {
+      console.warn('[picbed] 缩略图没传成，这张图将直接用原图：', e.message || e);
+    }
+    return image;
   }
 
   async function processQueue() {
     if (processing) return;
     processing = true;
     let uploadedAny = false;
-    const dupCtx = { action: null };
     try {
       for (const item of queue) {
         if (item.done) continue;
         item.pct = 0;
         item.status.textContent = '上传中…';
         try {
-          const url = await uploadFile(item.file, item, dupCtx);
+          const image = await uploadFile(item.file, item);
           item.done = true;
-          if (url && url.skipped) {
-            item.status.textContent = '已跳过（同名文件）';
-            item.row.classList.add('done');
-            updateUploadFab();
-            await sleep(350);
-            item.row.remove();
-            continue;
-          }
           uploadedAny = true;
           item.pct = 100;
           item.fill.style.width = '100%';
           item.status.textContent = '完成';
           item.row.classList.add('done');
-          addResult(url, item.file.name);
-          saveHistory(url, item.file.name);
+          addResult(image.url, item.file.name);
+          saveHistory(image.url, item.file.name);
           updateUploadFab();
           await sleep(350);
           item.row.remove();
@@ -1493,7 +1536,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // ---------- 上传状态面板（右下悬浮按钮） ----------
   // 视图模式：'admin' = 管理视图，'public' = 游客公开视图（见 switchView）
   // 本机已保存密码则直接进管理视图，否则默认展示公开画廊
-  let view = (cfg.password && cfg.worker) ? 'admin' : 'public';
+  let view = (cfg.password && cfg.api) ? 'admin' : 'public';
   let panelOpen = false;
 
   function openPanel() {
@@ -1545,9 +1588,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   // ---------- 相册 ----------
-  let galleryMarker = '';
   let galleryLoaded = 0;
-  let galleryPrefix = cfg.prefix + '/'; // 当前目录（尾部带 /）
+  let galleryPage = 1;   // 新接口用页码分页（旧版是 marker 游标）
+  let galleryTotal = 0;
+  let galleryMaxPage = 1;
+  let galleryAlbum = ''; // 当前相册名（'' = 根）。相册是数据库里的一列，不再是键前缀
+  let galleryFolders = []; // 当前层级的子相册，随第一页一起返回
   // 相册内容的世代号：每次发起加载都 ++（管理视图与公开画廊共用同一个 #galleryGrid，
   // 所以也共用一个世代号）。await 返回后只有「最新一次」请求有权往网格里写内容与分页
   // 状态 —— 否则「打开子相册，还没加载完就退回父目录」时，子相册的响应会晚于父目录
@@ -1558,229 +1604,92 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   const selectedKeys = new Set();
   let anchorFig = null; // Shift 连选的锚点卡片
 
-  // 公开画廊：publicPrefix 是相对 cfg.prefix 的路径（'' 或 'xxx/'）
-  let publicPrefix = '';
-  let publicMarker = '';
+  // 公开画廊（访客视图）：同样按相册名浏览，另外带一个分级档位
+  let publicAlbum = '';
   let publicLoaded = 0;
-  const publicKeys = new Set(); // 已公开图片的相对键（相对 cfg.prefix）
-  let publicKeysLoaded = false; // publicKeys 是否已完整加载过；未加载完成时缓存不可信
+  let publicPage = 1;
+  let publicTotal = 0;
+  let publicMaxPage = 1;
+  let publicFolders = [];
+  // 分级档位来自 URL 的 ?rating= 参数（r15 = G+R12+R15 / r15_only = 仅 R15），
+  // 是个「安静」的开关，页面上不放控件；空串表示用服务端的默认档。
+  const publicRatingParam = () => new URLSearchParams(location.search).get('rating') || '';
 
-  function pubRelOf(key) {
-    const root = cfg.prefix + '/';
-    return key.startsWith(root) ? key.slice(root.length) : key;
-  }
-  // 公开标记键：img/_picbed/public/<相对键>（零字节对象）
-  function pubMarkerOf(key) {
-    return cfg.prefix + '/_picbed/public/' + pubRelOf(key);
+  // ---------- 图片数据缓存 ----------
+  // 网格里每一项都缓存**整行数据**（id / url / thumb_url / rating / is_hidden / album），
+  // 按 r2_key 索引。旧版只存键，所以「是否公开」得靠另一套零字节标记对象去查；
+  // 现在状态就在行里，不用再单独维护一份。
+  const itemsByKey = new Map();
+  function remember(row) {
+    itemsByKey.set(row.key, row);
+    return row;
   }
 
-  // 收集 keys 中「实际已公开」的标记键。
-  // publicKeys 已完整加载过时直接查缓存（未命中即「未公开」，零额外请求）；
-  // 加载失败或尚未完成时缓存不可信，才逐张 HEAD COS 兜底 ——
-  // 否则 /public 一次失败会让后续移动静默丢掉公开状态、删除残留孤儿标记
-  async function collectPublicMarkers(keys) {
-    const out = [];
-    for (const k of keys) {
-      if (publicKeys.has(pubRelOf(k))) { out.push(pubMarkerOf(k)); continue; }
-      if (!publicKeysLoaded && (await headP(pubMarkerOf(k))).state === 'exists') out.push(pubMarkerOf(k));
+  /** 对访客是否可见：没被隐藏，且分过级（unspecified 不进任何相册）—— 两个维度是独立的 */
+  function isPublished(row) {
+    return !!row && !row.is_hidden && row.rating !== 'unspecified';
+  }
+
+  /** 把一批键换成 id（批量接口按 id 操作） */
+  function idsOf(keys) {
+    return [...keys].map((k) => itemsByKey.get(k)).filter(Boolean).map((r) => r.id);
+  }
+
+  // 批量改动。后端单次上限 500 条，前端按 500 分块（「跨页全选」很容易超）
+  const BULK_CHUNK = 500;
+  async function bulkUpdate(ids, patch) {
+    let n = 0;
+    for (let i = 0; i < ids.length; i += BULK_CHUNK) {
+      const r = await apiSend('/api/images/bulk', 'POST', Object.assign({ ids: ids.slice(i, i + BULK_CHUNK) }, patch));
+      n += r.updated || 0;
     }
-    return out;
+    return n;
+  }
+  async function bulkDelete(ids) {
+    let n = 0;
+    for (let i = 0; i < ids.length; i += BULK_CHUNK) {
+      const r = await apiSend('/api/images/bulk', 'POST', { ids: ids.slice(i, i + BULK_CHUNK), delete: true });
+      n += r.deleted || 0;
+    }
+    return n;
   }
 
-  function getBucketP(params) {
-    return new Promise((resolve, reject) => {
-      cos.getBucket({ Bucket: cfg.bucket, Region: cfg.region, ...params }, (err, data) => (err ? reject(err) : resolve(data)));
-    });
-  }
-  function copyP(sourceKey, targetKey) {
-    return new Promise((resolve, reject) => {
-      cos.sliceCopyFile({
-        Bucket: cfg.bucket,
-        Region: cfg.region,
-        Key: targetKey,
-        CopySource: `${cfg.bucket}.cos.${cfg.region}.myqcloud.com/${sourceKey.split('/').map(encodeURIComponent).join('/')}`,
-      }, (err, data) => (err ? reject(err) : resolve(data)));
-    });
-  }
-  function putP(key, body) {
-    return new Promise((resolve, reject) => {
-      cos.putObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key, Body: body || '' }, (err, data) => (err ? reject(err) : resolve(data)));
-    });
-  }
-  function deleteKeysP(keys) {
-    return new Promise((resolve, reject) => {
-      const chunks = [];
-      for (let i = 0; i < keys.length; i += 500) chunks.push(keys.slice(i, i + 500));
-      let idx = 0;
-      const next = () => {
-        if (idx >= chunks.length) return resolve();
-        cos.deleteMultipleObject({
-          Bucket: cfg.bucket,
-          Region: cfg.region,
-          Objects: chunks[idx].map((k) => ({ Key: k })),
-        }, (err) => {
-          if (err) return reject(err);
-          idx++;
-          next();
-        });
-      };
-      next();
-    });
-  }
-  function headP(key) {
-    return new Promise((resolve) => {
-      cos.headObject({ Bucket: cfg.bucket, Region: cfg.region, Key: key }, (err, data) => {
-        if (err) return resolve({ state: err.statusCode === 404 ? 'free' : 'error' });
-        const size = data
-          ? Number((data.headers && data.headers['content-length']) || data['content-length']) || 0
-          : 0;
-        resolve({ state: 'exists', size });
-      });
-    });
+  /** 单张改分级 / 隐藏状态，成功后把本地的行更新掉 */
+  async function patchImage(id, patch) {
+    const data = await apiSend('/api/images/' + id, 'PATCH', patch);
+    if (data && data.image) remember(data.image);
+    return data && data.image;
   }
 
   // 内容一致性检查：先比大小，大小相同则下载远端逐字节比对
-  async function compareFiles(file, key) {
-    const head = await headP(key);
-    if (head.state !== 'exists') return 'unknown';
-    if (head.size !== file.size) return 'diff';
-    let remoteBuf;
-    try {
-      const resp = await fetch(publicUrl(key));
-      if (!resp.ok) return 'size-same';
-      remoteBuf = new Uint8Array(await resp.arrayBuffer());
-    } catch (e) {
-      return 'size-same';
-    }
-    const localBuf = new Uint8Array(await file.arrayBuffer());
-    if (remoteBuf.length !== localBuf.length) return 'diff';
-    for (let i = 0; i < localBuf.length; i++) {
-      if (remoteBuf[i] !== localBuf[i]) return 'diff';
-    }
-    return 'same';
+  // 旧版的重名冲突流程（compareFiles / askDialog / autoRenameKey / resolveCollisions）整体删除：
+  // 服务端现在每次上传都生成随机且不可变的键，**键永远不会冲突**；
+  // 需要提示「同相册已有同名文件」时按 filename 查一次列表即可（见 findDuplicate）。
+
+  /** 查同相册里是否已有同名文件（上传前提示用，不阻塞上传） */
+  async function findDuplicate(album, filename) {
+    const qs = new URLSearchParams({ album: album || '', q: filename, pageSize: '10' });
+    const data = await api('/api/images?' + qs.toString());
+    return (data.images || []).find((r) => r.filename === filename) || null;
   }
 
-  function askDialog(message, opts) {
-    return new Promise((resolve) => {
-      $('dupMsg').textContent = message;
-      $('dupOverwrite').textContent = (opts && opts.overwrite) || '覆盖';
-      $('dupRename').textContent = (opts && opts.rename) || '自动重命名';
-      $('dupSkip').textContent = (opts && opts.cancel) || '取消';
-      $('dupPreview').hidden = !(opts && opts.file);
-      $('dupApplyAll').checked = false;
-      if (opts && opts.file) {
-        $('dupNewImg').src = URL.createObjectURL(opts.file);
-        $('dupOldImg').src = publicUrl(opts.oldKey);
-        compareFiles(opts.file, opts.oldKey).then((r) => {
-          const el = $('dupCompare');
-          const show = (cls, ic, text) => {
-            el.textContent = '';
-            el.className = 'dup-compare' + (cls ? ' ' + cls : '');
-            if (ic) el.appendChild(icon(ic));
-            if (text) el.appendChild(document.createTextNode(text));
-          };
-          if (r === 'same') show('same', 'check', '两个文件内容完全一致');
-          else if (r === 'diff') show('diff', 'alert', '两个文件内容不同（覆盖会替换现有文件）');
-          else if (r === 'size-same') show('', null, '大小一致，但无法完成内容比对');
-          else show('', null, '');
-        });
-      } else {
-        $('dupCompare').textContent = '';
-        $('dupCompare').className = 'dup-compare';
-      }
-      $('dupDialog').hidden = false;
-      const answer = (action) => {
-        $('dupDialog').hidden = true;
-        resolve({ action, applyAll: $('dupApplyAll').checked });
-      };
-      $('dupOverwrite').onclick = () => answer('overwrite');
-      $('dupRename').onclick = () => answer('rename');
-      $('dupSkip').onclick = () => answer('cancel');
-    });
-  }
+  // ---------- 相册工具 ----------
+  // 相册不再是键前缀，就是一个以 / 分隔的名字。下面这些函数负责它的解析与校验。
 
-  async function autoRenameKey(key) {
-    const dot = key.lastIndexOf('.');
-    const stem = dot > 0 ? key.slice(0, dot) : key;
-    const ext = dot > 0 ? key.slice(dot) : '';
-    for (let n = 1; n < 1000; n++) {
-      const cand = `${stem} (${n})${ext}`;
-      if ((await headP(cand)).state === 'free') return cand;
-    }
-    return `${stem}_${Date.now()}${ext}`;
-  }
-
-  async function resolveCollisions(pairs) {
-    const collided = [];
-    for (const p of pairs) {
-      if ((await headP(p.targetKey)).state === 'exists') collided.push(p.targetKey);
-    }
-    if (!collided.length) return { action: 'go', map: {}, overwritten: [] };
-    const { action } = await askDialog(`目标位置已有 ${collided.length} 个同名文件，如何处理？`, { cancel: '取消' });
-    if (action === 'cancel') return { action: 'cancel', map: {}, overwritten: [] };
-    // overwritten 非空表示这些目标键将被新内容覆盖，调用方需据此校正公开标记
-    if (action === 'overwrite') return { action: 'go', map: {}, overwritten: collided };
-    const map = {};
-    for (const t of collided) map[t] = await autoRenameKey(t);
-    return { action: 'go', map, overwritten: [] };
-  }
-
-  async function listAllKeys(prefix) {
-    const all = [];
-    let marker = '';
-    for (;;) {
-      const data = await getBucketP({ Prefix: prefix, MaxKeys: 1000, Marker: marker });
-      all.push(...(data.Contents || []).map((c) => c.Key));
-      if (String(data.IsTruncated) === 'true' && data.NextMarker) marker = data.NextMarker;
-      else break;
-    }
-    return all;
-  }
-
-  // 相册路径：允许用 / 分隔多级目录，逐段清洗非法字符并过滤 . 与 ..
-  function sanitizePath(input) {
-    return String(input || '')
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((s) => sanitizeSegment(s).slice(0, 40))
-      .filter(Boolean)
-      .join('/');
-  }
-
-  // 保留命名空间：img/_picbed/ 存公开标记，禁止作为相册名/上传目录使用
-  const RESERVED_SEGMENT = '_picbed';
-
-  function hasReservedSegment(path) {
-    return String(path || '')
-      .replace(/\\/g, '/')
-      .split('/')
-      .some((s) => sanitizeSegment(s).toLowerCase() === RESERVED_SEGMENT);
-  }
-
-  // 逐级创建相册标记，保证多级路径下每一层都是真实存在的相册
-  async function ensureAlbumPath(prefix) {
-    const root = cfg.prefix + '/';
-    if (!prefix || !prefix.startsWith(root)) return;
-    const rel = prefix.slice(root.length).replace(/\/+$/, '');
-    if (!rel || hasReservedSegment(rel)) return;
-    let acc = root;
-    for (const seg of rel.split('/')) {
-      acc += seg + '/';
-      await putP(acc, '');
-    }
-    invalidateAlbumTree();
-  }
-
-  // 解析「新建 / 移动 / 重命名」输入的目标目录：
-  //   留空 = 图床根目录；以 / 开头 = 相对图床根目录；否则相对当前目录
-  //   命中保留命名空间时返回 null
-  function parseTargetPrefix(raw) {
+  /** 把用户输入解析成相册名：留空 = 根；以 / 开头 = 从根算起；否则相对当前相册 */
+  function parseTargetAlbum(raw) {
     const text = String(raw == null ? '' : raw).trim();
     const abs = text.startsWith('/');
-    const path = sanitizePath(text.replace(/^\/+/, ''));
-    if (hasReservedSegment(path)) return null;
-    if (!path) return cfg.prefix + '/';
-    return abs ? cfg.prefix + '/' + path + '/' : galleryPrefix + path + '/';
+    const album = sanitizeAlbum(text.replace(/^\/+/, ''));
+    if (album === null) return null; // 含保留段
+    if (!album) return '';
+    return abs ? album : albumJoin(galleryAlbum, album);
+  }
+
+  /** target 是否落在 base 子树里（含自身）。按路径段比较 —— 不能用 startsWith，否则 a 会吃掉 ab */
+  function inSubtree(target, base) {
+    if (!base) return true;
+    return target === base || target.startsWith(base + '/');
   }
 
   // ---------- 自定义弹窗 ----------
@@ -1861,25 +1770,24 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   // ---------- 相册目录树（弹窗内补全用） ----------
-  let albumTreePaths = null;   // 扁平的相册路径数组（相对 cfg.prefix）
+  let albumTreePaths = null;   // 扁平的相册名数组，供输入框的自动补全树使用
   let albumTreeLoading = null;
 
   function invalidateAlbumTree() { albumTreePaths = null; }
 
   // 从 /list 全量结果推导相册路径：标记对象（尾 /）直接成路径，
   // 普通对象则补上其所有祖先目录（覆盖文件夹上传产生的隐式目录）
-  function buildAlbumPaths(items) {
-    const root = cfg.prefix + '/';
+  /** 把相册名展开成含所有祖先层级的路径数组（'a/b' 会同时产出 'a' 和 'a/b'） */
+  function buildAlbumPaths(albums) {
     const set = new Set();
-    for (const it of items) {
-      const key = (it && it.key) || '';
-      if (!key.startsWith(root)) continue;
-      const rel = key.slice(root.length);
-      if (!rel || hasReservedSegment(rel)) continue; // 保留命名空间不进目录树
-      if (rel.endsWith('/')) { set.add(rel); continue; }
-      const dirs = rel.split('/').slice(0, -1);
+    for (const a of albums) {
+      const name = String(a || '').replace(/^\/+|\/+$/g, '');
+      if (!name) continue;
       let acc = '';
-      for (const d of dirs) { acc += d + '/'; set.add(acc); }
+      for (const p of name.split('/')) {
+        acc = acc ? acc + '/' + p : p;
+        set.add(acc);
+      }
     }
     return [...set].sort();
   }
@@ -1888,17 +1796,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (albumTreePaths) return albumTreePaths;
     if (albumTreeLoading) return albumTreeLoading;
     albumTreeLoading = (async () => {
-      const items = [];
-      let marker = '';
-      for (;;) {
-        const res = await fetch(`${cfg.worker}/list${marker ? '?marker=' + encodeURIComponent(marker) : ''}`, { headers: listHeaders() });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || '加载相册列表失败');
-        items.push(...(data.items || []));
-        if (data.truncated && data.nextMarker) marker = data.nextMarker;
-        else break;
-      }
-      albumTreePaths = buildAlbumPaths(items);
+      // 相册列表直接来自数据库（DISTINCT album），不再靠列举对象存储里的目录占位对象
+      const data = await api('/api/albums');
+      albumTreePaths = buildAlbumPaths((data.albums || []).map((r) => r.album));
       return albumTreePaths;
     })();
     try {
@@ -2015,16 +1915,22 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     setLabel(btn, loading ? '加载中…' : '加载更多');
   }
 
+  // 每页张数：接口硬上限是 200（旧配置里的 maxKeys=500 会直接被夹到 200）
+  const PAGE_SIZE = 100;
+
   async function loadGallery(reset) {
     if (!needWorker()) return; // 提前返回前不作废在途请求：这条路不清网格，让它照常渲染
     const seq = ++galleryReqSeq; // 本次加载取得所有权，所有在途请求就此作废
-    const prefix = galleryPrefix; // 快照：await 期间用户可能已经切到别的目录
+    const album = galleryAlbum; // 快照：await 期间用户可能已经切到别的相册
     if (reset) {
-      galleryMarker = '';
+      galleryPage = 1;
       galleryLoaded = 0;
+      galleryFolders = [];
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 和在途下载成对：卡片都没了，就别再往下下（blob 也在这里一起回收）
       clearSelection();
+    } else {
+      galleryPage++;
     }
     // 提前渲染面包屑：既让导航目标立刻可见，也让下面骨架量高度时量的是最终布局
     // （空的面包屑比填满后矮约 29px，量早了会多算一行骨架）
@@ -2036,35 +1942,31 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const btn = $('loadMore');
     loadMoreState(true);
     try {
-      const data = await getBucketP({
-        Prefix: prefix,
-        Delimiter: '/',
-        MaxKeys: cfg.maxKeys || 500,
-        Marker: galleryMarker,
-      });
+      const qs = new URLSearchParams({ album, page: String(galleryPage), pageSize: String(PAGE_SIZE) });
+      const data = await api('/api/images?' + qs.toString());
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       if (reset) {
-        const reserved = cfg.prefix + '/_picbed/';
-        for (const f of data.CommonPrefixes || []) {
-          if (f.Prefix === reserved) continue; // 公开标记的保留命名空间，管理视图不展示
-          $('galleryGrid').appendChild(renderFolderTile(f.Prefix));
-        }
+        // 子相册由接口随第一页一起给（旧版靠 COS 的 CommonPrefixes，翻页时不追加）
+        for (const f of data.folders || []) $('galleryGrid').appendChild(renderFolderTile(f.album, f.n));
       }
-      const items = (data.Contents || [])
-        .filter((c) => !c.Key.endsWith('/') && c.Key !== prefix)
-        .reverse();
-      const thumbN = cfg.thumb ? thumbSize() : 0; // 量一次布局，循环里复用
-      for (const it of items) $('galleryGrid').appendChild(renderGridItem({ key: it.Key }, '', thumbN));
-      refreshPublicIndicators(); // 公开状态可能先于/后于相册加载完成，渲染后再同步一次
+      const items = data.images || [];
+      for (const row of items) {
+        remember(row);
+        $('galleryGrid').appendChild(renderGridItem(row, ''));
+      }
+      galleryTotal = data.total || 0;
+      galleryFolders = data.folders || [];
+      galleryMaxPage = Math.max(1, Math.ceil(galleryTotal / PAGE_SIZE));
       galleryLoaded += items.length;
-      $('galleryCount').textContent = `已显示 ${galleryLoaded} 张`;
-      galleryMarker = String(data.IsTruncated) === 'true' ? data.NextMarker : '';
-      btn.hidden = !galleryMarker;
+      $('galleryCount').textContent = galleryTotal > 0
+        ? `已显示 ${galleryLoaded} / ${galleryTotal} 张`
+        : '这个相册还是空的';
+      btn.hidden = galleryPage >= galleryMaxPage;
     } catch (e) {
       console.error('[picbed] 相册加载失败:', e.message || e);
       // 已经切走就连报错都不弹：用户看的是别的目录，这次失败与他无关
-      if (seq === galleryReqSeq) toast('相册加载失败：' + ((e && e.error && e.error.Message) || e.message || e), true);
+      if (seq === galleryReqSeq) toast('相册加载失败：' + errMsg(e), true);
     } finally {
       hideGridLoader(gridSeq); // 内部按 gridLoaderOwner 判断，旧请求撤不掉新请求的骨架
       release();
@@ -2088,17 +1990,20 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   async function loadPublicGallery(reset) {
     const seq = ++galleryReqSeq; // 与 loadGallery 共用世代号：网格是同一个
     if (reset) {
-      publicMarker = '';
+      publicPage = 1;
       publicLoaded = 0;
+      publicFolders = [];
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 同上：网格清了，在途的缩略图请求与 blob 一起收掉
+    } else {
+      publicPage++;
     }
     // 离线访客不点亮任何加载指示：beginLoad 必须在这些提前返回之后
-    if (!cfg.worker) {
+    if (!cfg.api) {
       // 上面已经清空网格并作废了在途请求，那条路的 loadMoreState(false) 不会再执行，这里补上
       loadMoreState(false);
       renderBreadcrumb();
-      publicGridHint('还没有配置图片服务地址，无法加载公开画廊。', 'alert');
+      publicGridHint('还没有配置后端地址，无法加载公开画廊。', 'alert');
       return;
     }
     renderBreadcrumb(); // 同上：先渲染，骨架才量得准
@@ -2109,28 +2014,34 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const btn = $('loadMore');
     loadMoreState(true);
     try {
-      const q = new URLSearchParams();
-      if (publicPrefix) q.set('prefix', publicPrefix);
-      if (publicMarker) q.set('marker', publicMarker);
-      const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const qs = new URLSearchParams({ album: publicAlbum, page: String(publicPage), pageSize: String(PAGE_SIZE) });
+      // 分级档位只从 URL 的 ?rating= 来（r15 = G+R12+R15，r15_only = 仅 R15），页面上不放控件
+      const rating = publicRatingParam();
+      if (rating) qs.set('rating', rating);
+
+      const data = await api('/api/public/images?' + qs.toString());
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       if (reset) {
-        for (const folder of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(folder));
+        for (const f of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(f.album, f.n));
       }
-      const files = (data.files || []).slice().reverse();
-      const thumbN = cfg.thumb ? thumbSize() : 0; // 量一次布局，循环里复用
-      for (const f of files) {
-        $('galleryGrid').appendChild(renderGridItem({ key: cfg.prefix + '/' + f.key }, 'public', thumbN));
+      const files = data.images || [];
+      for (const row of files) {
+        remember(row);
+        $('galleryGrid').appendChild(renderGridItem(row, 'public'));
       }
+      publicTotal = data.total || 0;
+      publicFolders = data.folders || [];
+      publicMaxPage = Math.max(1, Math.ceil(publicTotal / PAGE_SIZE));
       publicLoaded += files.length;
-      $('galleryCount').textContent = `已显示 ${publicLoaded} 张公开图片`;
-      publicMarker = data.truncated && data.nextMarker ? data.nextMarker : '';
-      btn.hidden = !publicMarker;
-      if (reset && !publicMarker && !publicLoaded && !(data.folders || []).length) {
-        publicGridHint(publicPrefix ? '这个相册里还没有公开的图片。' : '还没有公开的图片。管理员可在「我的相册」里点图片右上角的公开按钮设为公开。');
+      $('galleryCount').textContent = publicTotal > 0
+        ? `已显示 ${publicLoaded} / ${publicTotal} 张公开图片`
+        : '这里还没有可看的图片';
+      btn.hidden = publicPage >= publicMaxPage;
+      if (reset && publicTotal === 0 && !(data.folders || []).length) {
+        publicGridHint(publicAlbum
+          ? '这个相册里还没有可看的图片。'
+          : '还没有公开的图片。管理员可以在「我的相册」里给图片设置分级。');
       }
     } catch (e) {
       console.error('[picbed] 公开画廊加载失败:', e.message || e);
@@ -2144,82 +2055,56 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   }
 
-  function renderPublicFolderTile(relPrefix) {
-    const name = relPrefix.replace(/\/+$/, '').split('/').pop() || relPrefix;
+  /** 访客视图的子相册卡片。album 是完整相册名，n 是子树里的可看图数 */
+  function renderPublicFolderTile(album, n) {
+    const name = String(album).split('/').pop() || album;
     const fig = document.createElement('figure');
     fig.className = 'folder-tile';
     const iconEl = document.createElement('div');
     iconEl.className = 'folder-icon';
     iconEl.appendChild(icon('folder'));
     const cap = document.createElement('figcaption');
-    cap.textContent = name;
+    cap.textContent = n ? `${name}（${n}）` : name;
     fig.append(iconEl, cap);
-    fig.onclick = () => { publicPrefix = relPrefix; loadPublicGallery(true); };
+    fig.onclick = () => { publicAlbum = album; loadPublicGallery(true); };
     return fig;
   }
 
-  // ---------- 公开状态（管理视图） ----------
-  // 拉取全部公开标记，填充 publicKeys（以 /public 接口为准，无需密码）
-  // 必须带 flat=1：否则子相册里的标记会被折叠进 folders，公开状态读不全
-  async function loadPublicMarkers() {
-    if (!cfg.worker) return;
-    const release = beginLoad();
-    // try/finally 必须在本函数内：调用点（switchView）的 .catch 在另一个函数里，
-    // 那边只弹 toast，请求抛错时计数永远收不回来 → 进度条永久卡住
-    try {
-      const next = new Set();
-      let marker = '';
-      for (;;) {
-        const q = new URLSearchParams();
-        q.set('flat', '1');
-        if (marker) q.set('marker', marker);
-        const res = await fetch(`${cfg.worker}/public?${q.toString()}`);
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        for (const f of data.files || []) next.add(f.key);
-        if (data.truncated && data.nextMarker) marker = data.nextMarker;
-        else break;
-      }
-      publicKeys.clear();
-      next.forEach((k) => publicKeys.add(k));
-      publicKeysLoaded = true; // 完整走完一轮才标记为可信
-      refreshPublicIndicators();
-      updateBulkBar();
-    } finally {
-      release();
-    }
-  }
+  // ---------- 分级 / 隐藏（管理视图） ----------
+  // 旧版的「公开状态」是一套零字节标记对象，要单独拉一份缓存（loadPublicMarkers）；
+  // 现在状态就在图片行里，改完直接更新本地行 + 重画徽标，不用再单独同步。
+  const RATING_LABEL = { G: 'G', R12: 'R12', R15: 'R15', R18: 'R18', unspecified: '未分类' };
 
+  /** 重画网格里每张卡片的分级徽标与隐藏态 */
   function refreshPublicIndicators() {
     document.querySelectorAll('#galleryGrid figure[data-key]').forEach((fig) => {
-      const on = publicKeys.has(pubRelOf(fig.dataset.key));
+      const row = itemsByKey.get(fig.dataset.key);
+      if (!row) return;
+      const badge = fig.querySelector('.pub-badge');
+      if (badge) badge.hidden = !isPublished(row); // 文件名前的徽标：能进相册才显示
+      fig.classList.toggle('is-hidden', !!row.is_hidden);
       const btn = fig.querySelector('.pub-toggle');
       if (btn) {
-        setIcon(btn, on ? 'globe' : 'moon');
-        btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
-        btn.classList.toggle('on', on);
+        setIcon(btn, row.is_hidden ? 'moon' : 'globe');
+        btn.title = row.is_hidden ? '已隐藏（点击取消隐藏）' : '隐藏（不进相册，直链仍可打开）';
+        btn.classList.toggle('on', !row.is_hidden);
       }
-      const badge = fig.querySelector('.pub-badge');
-      if (badge) badge.hidden = !on; // 文件名前的 pub 徽标
     });
     if (lightboxItem && !$('togglePublicBtn').hidden) updateLightboxPublicBtn();
   }
 
+  /** 切换单张图的隐藏状态。隐藏 = 不进任何相册，但直链照常能打开（这是刻意的） */
   async function togglePublic(key) {
-    const rel = pubRelOf(key);
+    const row = itemsByKey.get(key);
+    if (!row) return;
     const btn = document.querySelector(`#galleryGrid figure[data-key="${CSS.escape(key)}"] .pub-toggle`);
     if (btn) btn.disabled = true;
     try {
-      if (publicKeys.has(rel)) {
-        await deleteKeysP([pubMarkerOf(key)]);
-        publicKeys.delete(rel);
-        toast('已取消公开');
-      } else {
-        await putP(pubMarkerOf(key), '');
-        publicKeys.add(rel);
-        toast('已设为公开，游客可在公开画廊看到');
-      }
+      const image = await patchImage(row.id, { is_hidden: row.is_hidden ? 0 : 1 });
+      if (image) Object.assign(row, image);
       refreshPublicIndicators();
+      updateBulkBar();
+      toast(row.is_hidden ? '已隐藏，不再出现在相册里（直链仍可打开）' : '已取消隐藏');
     } catch (e) {
       toast('操作失败：' + errMsg(e), true);
     } finally {
@@ -2227,31 +2112,53 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   }
 
+  /** 改单张图的分级。unspecified = 不进任何相册（旧版「未公开」的等价物） */
+  async function setRating(key, rating) {
+    const row = itemsByKey.get(key);
+    if (!row) return;
+    try {
+      const image = await patchImage(row.id, { rating });
+      if (image) Object.assign(row, image);
+      refreshPublicIndicators();
+      updateBulkBar();
+      toast(rating === 'unspecified' ? '已设为未分类，不进相册' : '已设为 ' + rating);
+    } catch (e) {
+      toast('操作失败：' + errMsg(e), true);
+    }
+  }
+
   async function bulkTogglePublic() {
     const keys = [...selectedKeys];
     if (!keys.length) return;
-    const allPublic = keys.every((k) => publicKeys.has(pubRelOf(k)));
+    const rows = keys.map((k) => itemsByKey.get(k)).filter(Boolean);
+    const allHidden = rows.length > 0 && rows.every((r) => r.is_hidden);
     const btn = $('bulkPublicBtn');
     btn.disabled = true;
     try {
-      if (allPublic) {
-        await deleteKeysP(keys.map(pubMarkerOf));
-        keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
-        toast(`已取消公开 ${keys.length} 张`);
-      } else {
-        const todo = keys.filter((k) => !publicKeys.has(pubRelOf(k)));
-        for (const k of todo) {
-          await putP(pubMarkerOf(k), '');
-          publicKeys.add(pubRelOf(k));
-        }
-        toast(`已公开 ${todo.length} 张`);
-      }
+      await bulkUpdate(rows.map((r) => r.id), { is_hidden: allHidden ? 0 : 1 });
+      rows.forEach((r) => { r.is_hidden = allHidden ? 0 : 1; });
       refreshPublicIndicators();
       updateBulkBar();
+      toast(allHidden ? `已取消隐藏 ${rows.length} 张` : `已隐藏 ${rows.length} 张`);
     } catch (e) {
       toast('操作失败：' + errMsg(e), true);
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  /** 批量改分级 */
+  async function bulkSetRating(rating) {
+    const rows = [...selectedKeys].map((k) => itemsByKey.get(k)).filter(Boolean);
+    if (!rows.length) return;
+    try {
+      await bulkUpdate(rows.map((r) => r.id), { rating });
+      rows.forEach((r) => { r.rating = rating; });
+      refreshPublicIndicators();
+      updateBulkBar();
+      toast(rating === 'unspecified' ? `已设为未分类 ${rows.length} 张` : `已全部设为 ${rating}`);
+    } catch (e) {
+      toast('操作失败：' + errMsg(e), true);
     }
   }
 
@@ -2275,7 +2182,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       loadPublicGallery(true);
     } else {
       loadGallery(true);
-      loadPublicMarkers().catch((e) => toast('公开状态加载失败：' + (e.message || e), true));
     }
     updateUploadFab();
   }
@@ -2289,13 +2195,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return !!(dt && dt.types && [...dt.types].includes('Files'));
   }
 
-  function canDropInto(targetPrefix) {
+  function canDropInto(targetAlbum) {
     if (!dragPayload) return false;
     if (dragPayload.kind === 'folder') {
-      // 不能拖进自己或自己的子相册（否则会无限自我复制）
-      return !targetPrefix.startsWith(dragPayload.prefix);
+      // 不能拖进自己或自己的子相册（否则会无限自我嵌套）。
+      // 用路径段比较而不是 startsWith —— 否则相册 a 会被当成 ab 的父级。
+      return !inSubtree(targetAlbum, dragPayload.album);
     }
-    return targetPrefix !== galleryPrefix; // 图片已在当前目录，拖回当前目录是空操作
+    return targetAlbum !== galleryAlbum; // 图片已在当前相册，拖回来是空操作
   }
 
   function makeDropTarget(el, getTargetPrefix, allowUpload) {
@@ -2355,58 +2262,53 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     });
   }
 
-  async function performDrop(targetPrefix) {
+  async function performDrop(targetAlbum) {
     const payload = dragPayload;
     dragPayload = null;
     if (!payload) return;
     if (payload.kind === 'folder') {
-      const name = payload.prefix.slice(0, -1).split('/').pop();
-      const parent = payload.prefix.slice(0, -(name.length + 1));
-      if (targetPrefix === parent) return toast('已经在该位置', true);
-      try {
-        await ensureAlbumPath(targetPrefix);
-      } catch (e) {}
-      await moveFolder(payload.prefix, targetPrefix + name + '/');
+      const from = payload.album;
+      if (albumParent(from) === targetAlbum) return toast('已经在该位置', true);
+      if (inSubtree(targetAlbum, from)) return toast('不能移动到自身或其子相册下', true);
+      await moveAlbum(from, albumJoin(targetAlbum, from.split('/').pop()));
     } else {
-      await moveImagesTo(payload.keys, targetPrefix);
+      await moveImagesTo(payload.keys, targetAlbum);
     }
   }
 
-  async function moveImagesTo(keys, targetPrefix) {
+  /**
+   * 把选中的图片移动到目标相册。
+   * 只改数据库里的一列 —— R2 对象一个都不动，**直链保持不变**（这是刻意的：
+   * 分享出去的链接不会因为整理相册而失效）。
+   */
+  async function moveImagesTo(keys, targetAlbum) {
     if (!keys || !keys.length) return;
-    if (targetPrefix === galleryPrefix) return toast('图片已经在该目录', true);
-    const pairs = keys.map((k) => ({ key: k, targetKey: targetPrefix + k.split('/').pop() }));
-    const { action, map, overwritten } = await resolveCollisions(pairs);
-    if (action === 'cancel') return toast('已取消');
+    if (targetAlbum === galleryAlbum) return toast('图片已经在该相册', true);
+    const rows = keys.map((k) => itemsByKey.get(k)).filter(Boolean);
+    if (!rows.length) return toast('找不到这些图片的记录', true);
     try {
-      await ensureAlbumPath(targetPrefix);
-      for (let i = 0; i < pairs.length; i++) {
-        await copyP(pairs[i].key, map[pairs[i].targetKey] || pairs[i].targetKey);
-        if (i % 5 === 0 || i === pairs.length - 1) toast(`移动中 ${i + 1}/${pairs.length}`);
-      }
-      // 公开标记跟随图片移动（保持公开状态），旧标记随原图一起删除
-      const oldMarkers = await collectPublicMarkers(keys);
-      const movedPublic = pairs.filter((p) => oldMarkers.includes(pubMarkerOf(p.key)));
-      for (const p of movedPublic) {
-        const newKey = map[p.targetKey] || p.targetKey;
-        await putP(pubMarkerOf(newKey), '');
-        publicKeys.delete(pubRelOf(p.key));
-        publicKeys.add(pubRelOf(newKey));
-      }
-      // 覆盖移动时校正目标位置的公开标记：不公开的图覆盖掉公开的同名图时，
-      // 那个标记是上一个占用者留下的，会让新图凭空变公开
-      const staleTargets = (overwritten || []).filter((t) => {
-        const p = pairs.find((x) => x.targetKey === t);
-        return p && !oldMarkers.includes(pubMarkerOf(p.key));
-      });
-      const staleMarkers = await collectPublicMarkers(staleTargets);
-      staleTargets.forEach((t) => publicKeys.delete(pubRelOf(t)));
-      await deleteKeysP(keys.concat(oldMarkers, staleMarkers));
-      toast('移动完成');
+      await bulkUpdate(rows.map((r) => r.id), { album: targetAlbum });
+      rows.forEach((r) => { r.album = targetAlbum; });
+      toast(`已移动 ${rows.length} 张到「${targetAlbum || '根目录'}」（直链不变）`);
       clearSelection();
       loadGallery(true);
     } catch (err) {
-      toast('移动失败（已复制的文件保留在目标相册）：' + (err.message || err), true);
+      toast('移动失败：' + errMsg(err), true);
+    }
+  }
+
+  /** 重命名 / 移动整个相册（含子相册）：服务端一条 UPDATE 搞定，不搬 R2 里的文件 */
+  async function moveAlbum(from, to) {
+    if (!from || from === to) return;
+    try {
+      const r = await apiSend('/api/albums/rename', 'POST', { from, to });
+      invalidateAlbumTree();
+      toast(`已移到「${to || '根目录'}」，${r.changed} 张图受影响（直链不变）`);
+      // 当前正待在被移动的相册里时，跟着导航过去
+      if (inSubtree(galleryAlbum, from)) galleryAlbum = to + galleryAlbum.slice(from.length);
+      loadGallery(true);
+    } catch (e) {
+      toast('移动失败：' + errMsg(e), true);
     }
   }
 
@@ -2414,24 +2316,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const el = $('galleryPath');
     el.textContent = '';
     const isPublic = view === 'public';
-    const rootPrefix = cfg.prefix + '/';
-    const relCurrent = isPublic ? publicPrefix : galleryPrefix.slice(rootPrefix.length);
-    const go = (prefix) => {
+    const current = isPublic ? publicAlbum : galleryAlbum; // 相册名，'' = 根
+    const go = (album) => {
       if (isPublic) {
-        publicPrefix = prefix.slice(rootPrefix.length);
+        publicAlbum = album;
         loadPublicGallery(true);
       } else {
-        galleryPrefix = prefix;
+        galleryAlbum = album;
         loadGallery(true);
       }
     };
-    const crumb = (label, prefix, isCurrent, iconName) => {
+    const crumb = (label, album, isCurrent, iconName) => {
       const b = document.createElement('button');
       b.className = 'crumb' + (isCurrent ? ' current' : '');
       if (iconName) b.appendChild(icon(iconName));
       b.appendChild(document.createTextNode(label));
-      if (!isCurrent) b.onclick = () => go(prefix);
-      if (!isPublic) makeDropTarget(b, () => prefix); // 可把图片/相册拖到上级目录
+      if (!isCurrent) b.onclick = () => go(album);
+      if (!isPublic) makeDropTarget(b, () => album); // 可把图片/相册拖到上级相册
       el.appendChild(b);
     };
     const sep = () => {
@@ -2440,20 +2341,21 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       s.textContent = '/';
       el.appendChild(s);
     };
-    crumb(isPublic ? '公开画廊' : '全部', rootPrefix, relCurrent === '', isPublic ? 'globe' : 'folder');
-    if (relCurrent) {
-      let acc = rootPrefix;
-      const parts = relCurrent.replace(/\/$/, '').split('/');
+    crumb(isPublic ? '公开画廊' : '全部', '', current === '', isPublic ? 'globe' : 'folder');
+    if (current) {
+      let acc = '';
+      const parts = current.split('/').filter(Boolean);
       parts.forEach((p, i) => {
         sep();
-        acc += p + '/';
+        acc = acc ? acc + '/' + p : p;
         crumb(p, acc, i === parts.length - 1);
       });
     }
   }
 
-  // 相册的「重命名 / 移动 / 删除」操作（悬浮按钮与右键菜单共用）
-  async function renameAlbumDialog(prefix, name) {
+  // 相册的「重命名 / 移动 / 删除」（悬浮按钮与右键菜单共用）。
+  // 三者都只改数据库里的 album 列 —— R2 里一个对象都不动，所以**图片直链永远不变**。
+  async function renameAlbumDialog(album, name) {
     const raw = await promptDialog({
       title: '重命名 / 移动相册',
       label: '新的位置（含相册名）',
@@ -2462,17 +2364,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       tree: true,
     });
     if (raw === null || !String(raw).trim()) return;
-    const newPrefix = parseTargetPrefix(raw);
-    if (!newPrefix) return toast('_picbed 是保留目录名，不能使用', true);
-    if (newPrefix === prefix) return;
-    if (newPrefix.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
-    try {
-      await ensureAlbumPath(galleryPrefix); // 确保父级存在
-    } catch (err) {}
-    await moveFolder(prefix, newPrefix);
+    const to = parseTargetAlbum(raw);
+    if (to === null) return toast('_picbed 是保留目录名，不能使用', true);
+    if (to === album) return;
+    if (inSubtree(to, album)) return toast('不能移动到自身或其子相册', true);
+    await moveAlbum(album, to);
   }
 
-  async function moveAlbumDialog(prefix, name) {
+  async function moveAlbumDialog(album, name) {
     const raw = await promptDialog({
       title: `移动相册「${name}」`,
       label: '移动到哪个相册',
@@ -2481,100 +2380,86 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       tree: true,
     });
     if (raw === null) return;
-    const targetParent = parseTargetPrefix(raw);
-    if (!targetParent) return toast('_picbed 是保留目录名，不能使用', true);
-    if (targetParent === galleryPrefix) return toast('目标就是当前位置', true);
-    if (targetParent.startsWith(prefix)) return toast('不能移动到自身或其子相册', true);
-    try {
-      await ensureAlbumPath(targetParent);
-    } catch (err) {
-      return toast('目标目录创建失败：' + (err.message || err), true);
-    }
-    await moveFolder(prefix, targetParent + name + '/');
+    const parent = parseTargetAlbum(raw);
+    if (parent === null) return toast('_picbed 是保留目录名，不能使用', true);
+    if (parent === albumParent(album)) return toast('目标就是当前位置', true);
+    if (inSubtree(parent, album)) return toast('不能移动到自身或其子相册', true);
+    await moveAlbum(album, albumJoin(parent, name));
   }
 
-  async function deleteAlbumDialog(prefix, name) {
+  async function deleteAlbumDialog(album, name) {
     try {
-      const keys = await listAllKeys(prefix);
-      if (!keys.length) return toast('相册为空');
-      const files = keys.filter((k) => !k.endsWith('/'));
-      // 子相册（含空相册）也有零字节标记对象，必须一并删除，否则父相册删不掉
-      const subAlbums = keys.filter((k) => k.endsWith('/') && k !== prefix).length;
-      const extra = subAlbums ? ` 和 ${subAlbums} 个子相册` : '';
+      // 先问服务端要统计（图片数 / 子相册数 / 字节数），确认框里如实写出来
+      const stats = await api('/api/albums/stats?album=' + encodeURIComponent(album));
+      if (!stats.images && !stats.folders) return toast('相册是空的');
+      const extra = stats.folders ? ` 和 ${stats.folders} 个子相册` : '';
+      const mb = stats.bytes ? `（共 ${(stats.bytes / 1048576).toFixed(1)} MB）` : '';
       const ok = await confirmDialog({
         title: '删除相册',
-        message: `确定删除相册「${name}」？将删除其中 ${files.length} 张图片${extra}，不可恢复！`,
+        message: `确定删除相册「${name}」？将删除其中 ${stats.images} 张图片${extra}${mb}，不可恢复！`,
         okText: '删除相册',
       });
       if (!ok) return;
-      // 公开标记也要一并清掉，否则会残留指向已删图片的孤儿标记
-      const pubRoot = cfg.prefix + '/_picbed/public/';
-      const rel = prefix.slice((cfg.prefix + '/').length);
-      let pubMarkers = [];
-      if (rel) {
-        try {
-          pubMarkers = await listAllKeys(pubRoot + rel);
-        } catch (e) {
-          pubMarkers = [];
-        }
-      }
-      await deleteKeysP(keys.concat(pubMarkers)); // 文件 + 本相册标记 + 全部子相册标记 + 公开标记
-      pubMarkers.forEach((m) => publicKeys.delete(m.slice(pubRoot.length)));
+
+      const r = await api('/api/albums?album=' + encodeURIComponent(album), { method: 'DELETE' });
       invalidateAlbumTree();
-      toast('相册已删除');
+      toast(`已删除相册（${r.deleted} 张图）`);
+      // 删的正是当前所在相册（或它的子相册）时就退回父级
+      if (inSubtree(galleryAlbum, album)) galleryAlbum = albumParent(album);
       loadGallery(true);
     } catch (err) {
-      toast('删除失败：' + (err.message || err), true);
+      toast('删除失败：' + errMsg(err), true);
     }
   }
 
-  function renderFolderTile(prefix) {
-    const name = prefix.slice(0, -1).split('/').pop() || prefix;
+  /** 管理视图的子相册卡片。album 是完整相册名，n 是子树里的图片数 */
+  function renderFolderTile(album, n) {
+    const name = String(album).split('/').pop() || album;
     const fig = document.createElement('figure');
     fig.className = 'folder-tile';
     const iconEl = document.createElement('div');
     iconEl.className = 'folder-icon';
     iconEl.appendChild(icon('folder'));
     const cap = document.createElement('figcaption');
-    cap.textContent = name;
+    cap.textContent = n ? `${name}（${n}）` : name;
     const actions = document.createElement('div');
     actions.className = 'folder-actions';
     const rename = document.createElement('button');
     rename.appendChild(icon('pencil'));
     rename.title = '重命名相册（可用 / 创建多级）';
-    rename.onclick = (e) => { e.stopPropagation(); renameAlbumDialog(prefix, name); };
+    rename.onclick = (e) => { e.stopPropagation(); renameAlbumDialog(album, name); };
     const move = document.createElement('button');
     move.appendChild(icon('folder-move'));
     move.title = '移动相册到其他位置';
-    move.onclick = (e) => { e.stopPropagation(); moveAlbumDialog(prefix, name); };
+    move.onclick = (e) => { e.stopPropagation(); moveAlbumDialog(album, name); };
     const del = document.createElement('button');
     del.appendChild(icon('trash'));
     del.title = '删除相册及其全部图片';
-    del.onclick = (e) => { e.stopPropagation(); deleteAlbumDialog(prefix, name); };
+    del.onclick = (e) => { e.stopPropagation(); deleteAlbumDialog(album, name); };
     actions.append(rename, move, del);
     fig.append(iconEl, actions, cap);
-    fig.onclick = () => { galleryPrefix = prefix; loadGallery(true); };
+    fig.onclick = () => { galleryAlbum = album; loadGallery(true); };
     // 右键菜单：与悬浮按钮相同的操作
     fig.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
       showCtxMenu(e.clientX, e.clientY, [
-        { icon: 'folder', label: '打开相册', onClick: () => { galleryPrefix = prefix; loadGallery(true); } },
+        { icon: 'folder', label: '打开相册', onClick: () => { galleryAlbum = album; loadGallery(true); } },
         '-',
-        { icon: 'pencil', label: '重命名 / 移动相册', onClick: () => renameAlbumDialog(prefix, name) },
-        { icon: 'folder-move', label: '移动到其他位置', onClick: () => moveAlbumDialog(prefix, name) },
+        { icon: 'pencil', label: '重命名 / 移动相册', onClick: () => renameAlbumDialog(album, name) },
+        { icon: 'folder-move', label: '移动到其他位置', onClick: () => moveAlbumDialog(album, name) },
         '-',
-        { icon: 'trash', label: '删除相册', danger: true, onClick: () => deleteAlbumDialog(prefix, name) },
+        { icon: 'trash', label: '删除相册', danger: true, onClick: () => deleteAlbumDialog(album, name) },
       ]);
     });
     // 可拖拽（移动相册），也可作为放置目标：接收图片/相册，外部文件拖上来则直接上传到该相册
     fig.draggable = true;
     fig.addEventListener('dragstart', (e) => {
-      dragPayload = { kind: 'folder', prefix };
+      dragPayload = { kind: 'folder', album };
       e.dataTransfer.effectAllowed = 'move';
       try {
         e.dataTransfer.setData('application/x-picbed-move', 'folder');
-        e.dataTransfer.setData('text/plain', prefix);
+        e.dataTransfer.setData('text/plain', album);
       } catch (err) {}
       fig.classList.add('dragging');
     });
@@ -2582,100 +2467,30 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       fig.classList.remove('dragging');
       dragPayload = null;
     });
-    makeDropTarget(fig, () => prefix, true);
+    makeDropTarget(fig, () => album, true);
     return fig;
   }
 
-  async function moveFolder(oldPrefix, newPrefix) {
-    if (!newPrefix || newPrefix === oldPrefix) return;
-    invalidateAlbumTree(); // 目录结构即将变化
-    const keys = await listAllKeys(oldPrefix);
-    if (!keys.length) return toast('相册为空');
-    const files = keys.filter((k) => !k.endsWith('/'));
-    // 子相册标记（含空相册）也要一起搬走，否则旧相册会残留在父目录
-    const markers = keys.filter((k) => k.endsWith('/') && k !== oldPrefix);
-    const pairs = files.map((k) => ({ key: k, targetKey: newPrefix + k.slice(oldPrefix.length) }));
-    const { action, map, overwritten } = await resolveCollisions(pairs);
-    if (action === 'cancel') return toast('已取消');
-    // 相册内已公开的图片：标记要跟着一起搬
-    const root = cfg.prefix + '/';
-    const pubRoot = cfg.prefix + '/_picbed/public/';
-    const oldRel = oldPrefix.slice(root.length); // 旧相册相对路径（尾部带 /）
-    let pubMarkers = [];
-    if (oldRel) {
-      try {
-        pubMarkers = await listAllKeys(pubRoot + oldRel);
-      } catch (e) {
-        pubMarkers = [];
-      }
-    }
-    // 本次移动中「源图公开」的图片（以服务端列出的标记为准，与上面的 pubMarkers 同源）
-    const publicSourceKeys = new Set(
-      pubMarkers.map((m) => cfg.prefix + '/' + oldRel + m.slice((pubRoot + oldRel).length))
-    );
-    // 覆盖移动时，被覆盖的目标键上遗留的公开标记必须清掉：
-    // 不公开的图覆盖掉公开的同名图，旧标记会让新图凭空变公开
-    const staleTargets = (overwritten || []).filter((t) => {
-      const p = pairs.find((x) => x.targetKey === t);
-      return p && !publicSourceKeys.has(p.key);
-    });
-    const staleMarkers = await collectPublicMarkers(staleTargets);
-    staleTargets.forEach((t) => publicKeys.delete(pubRelOf(t)));
-    const total = pairs.length + markers.length + pubMarkers.length; // staleMarkers 在最后批量删除，不计入逐项进度
-    let done = 0;
-    try {
-      for (const p of pairs) {
-        await copyP(p.key, map[p.targetKey] || p.targetKey);
-        done++;
-        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
-      }
-      for (const m of markers) {
-        await putP(newPrefix + m.slice(oldPrefix.length), '');
-        done++;
-        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
-      }
-      for (const m of pubMarkers) {
-        const inside = m.slice((pubRoot + oldRel).length); // 相册内的相对键
-        const oldReal = cfg.prefix + '/' + oldRel + inside;
-        // map 以「目标键」为键（resolveCollisions 的约定），必须用 newPrefix+inside 查，
-        // 不能用 oldReal —— 否则目标有同名文件被自动重命名时，标记会写到旧的路径上
-        const newReal = map[newPrefix + inside] || newPrefix + inside;
-        await putP(pubMarkerOf(newReal), '');
-        publicKeys.delete(pubRelOf(oldReal));
-        publicKeys.add(pubRelOf(newReal));
-        done++;
-        if (done % 5 === 0 || done === total) toast(`移动中 ${done}/${total}`);
-      }
-      await deleteKeysP(keys.concat(pubMarkers, staleMarkers)); // 文件 + 旧相册标记 + 子相册旧标记 + 旧公开标记 + 被覆盖目标的遗留标记
-      await ensureAlbumPath(newPrefix); // 多级路径逐层建好，并补上新相册标记
-      toast('移动完成');
-      loadGallery(true);
-    } catch (err) {
-      toast('移动失败（已复制的文件保留在新相册）：' + (err.message || err), true);
-      loadGallery(true);
-    }
-  }
 
+  // 「新建相册」在新模型下不再需要占位对象：相册由图片的 album 列派生，没有图片就没有相册。
+  // 所以这个按钮变成「进入某个相册」——先把界面导航过去，往里传第一张图，相册就存在了。
   async function newAlbum() {
     if (!needWorker()) return;
     const raw = await promptDialog({
       title: '新建相册',
       label: '相册路径',
       placeholder: '如 旅行/2024/西藏',
-      help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
-      confirmText: '创建',
+      help: '相册在你往里面传第一张图时就创建好了。这里先带你进入该相册。',
+      confirmText: '进入',
       tree: true,
     });
     if (raw === null || !String(raw).trim()) return;
-    const target = parseTargetPrefix(raw);
-    if (!target) return toast('_picbed 是保留目录名，不能使用', true);
-    try {
-      await ensureAlbumPath(target);
-      toast('相册已创建');
-      loadGallery(true);
-    } catch (err) {
-      toast('创建失败：' + (err.message || err), true);
-    }
+    const album = parseTargetAlbum(raw);
+    if (album === null) return toast('_picbed 是保留目录名，不能使用', true);
+    if (!album) return toast('请输入相册名', true);
+    galleryAlbum = album;
+    loadGallery(true);
+    toast(`已进入「${album}」——往里传图即可创建这个相册`);
   }
 
   function toggleSelectMode() {
@@ -2787,10 +2602,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('bulkPublicBtn').disabled = !n;
     $('bulkDeleteBtn').disabled = !n;
     if (n) {
-      const allPublic = [...selectedKeys].every((k) => publicKeys.has(pubRelOf(k)));
+      // 按钮反映「点一下会发生什么」：全部已隐藏 → 显示「取消隐藏」
+      const rows = [...selectedKeys].map((k) => itemsByKey.get(k)).filter(Boolean);
+      const allHidden = rows.length > 0 && rows.every((r) => r.is_hidden);
       const btn = $('bulkPublicBtn');
-      setIcon(btn, allPublic ? 'moon' : 'globe');
-      setLabel(btn, allPublic ? '取消公开' : '设为公开');
+      setIcon(btn, allHidden ? 'globe' : 'moon');
+      setLabel(btn, allHidden ? '取消隐藏' : '隐藏');
     }
   }
 
@@ -2806,17 +2623,20 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       tree: true,
     });
     if (raw === null) return;
-    const target = parseTargetPrefix(raw);
-    if (!target) return toast('_picbed 是保留目录名，不能使用', true);
+    // 注意用 === null 判错：根目录是空串（合法目标），不能用 !target
+    const target = parseTargetAlbum(raw);
+    if (target === null) return toast('_picbed 是保留目录名，不能使用', true);
     await moveImagesTo(keys, target);
   }
 
   // 删除图片（连带清理公开标记）：批量栏、右键菜单、灯箱共用
+  /** 删除图片：服务端会连 R2 里的原图和缩略图一起清掉 */
   async function deleteImages(keys) {
-    const markers = await collectPublicMarkers(keys);
-    await deleteKeysP(keys.concat(markers));
-    keys.forEach((k) => publicKeys.delete(pubRelOf(k)));
-    toast('已删除');
+    const rows = keys.map((k) => itemsByKey.get(k)).filter(Boolean);
+    if (!rows.length) return;
+    await bulkDelete(rows.map((r) => r.id));
+    rows.forEach((r) => itemsByKey.delete(r.key));
+    toast(`已删除 ${rows.length} 张`);
     clearSelection();
     loadGallery(true);
   }
@@ -3168,10 +2988,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // thumbN：缩略图边长，0 表示取原图。由调用方算一次传进来 ——
   // renderGridItem 是在循环里逐张 append 的，若在这里现算会反复触发同步布局
-  function renderGridItem(it, mode, thumbN) {
+  function renderGridItem(it, mode) {
     const isPublic = mode === 'public';
     const fig = document.createElement('figure');
     fig.dataset.key = it.key;
+    fig.dataset.id = it.id; // 新接口的写操作都按 id 走（键是不可变的，但 id 才是主键）
     fig.classList.add('ph'); // 缩略图骨架层，图片 onload 后摘掉（见 .grid figure.ph::before）
     if (!isPublic) {
       if (selectMode) fig.classList.add('selectable');
@@ -3181,12 +3002,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       check.appendChild(icon('check'));
       fig.appendChild(check);
     }
-    const rawUrl = publicUrl(it.key);
-    // SVG 是矢量图、ICO 是图标容器：位图处理对它们没有意义（服务端也不支持），
-    // 直接取原图，省掉一次注定失败的往返。
-    // crop 而不是 thumbnail：格子只显示居中正方形，crop 裁出来的就是那一块。
-    // 原图比 N 小时 crop 缩不动、原样返回（已实测不会放大），所以小图是安全的。
-    const useThumb = !!thumbN && !/\.(svg|ico)$/i.test(it.key);
+    const rawUrl = it.url || publicUrl(it.key);
+    // 缩略图是**独立的 R2 对象**（上传时由浏览器生成），不是给原图加查询参数 ——
+    // R2 会忽略未知查询参数、拿原图回 200，「缩略图取不到就退回原图」的判断就永远不触发了。
+    // 没有缩略图的图（SVG/ICO、生成失败、还没补全的旧图）直接用原图。
+    const thumbUrlFull = it.thumb_url || null;
+    const useThumb = !!thumbUrlFull;
     const img = document.createElement('img');
     img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -3200,7 +3021,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 下载交给下载器：它自己决定是流式自取（有百分比与增量显形）还是退回原生加载
     dlLoad({
       fig, img, epoch: dlEpoch,
-      url: useThumb ? thumbUrl(rawUrl, it.key, thumbN) : rawUrl,
+      url: useThumb ? thumbUrlFull : rawUrl,
       rawUrl, thumb: useThumb,
       bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
     });
@@ -3208,14 +3029,15 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     fig.addEventListener('mouseenter', () => pfHover(it.key));
     fig.addEventListener('mouseleave', pfCancel);
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
-    const name = it.key.split('/').pop();
+    // 显示原始文件名：新键是时间戳+随机（不含文件名），名字保存在数据库里
+    const name = it.filename || it.key.split('/').pop();
     const cap = document.createElement('figcaption');
     if (!isPublic) {
       // 文件名前的公开状态徽标：不悬停也能看到是否公开
       const badge = document.createElement('span');
       badge.className = 'pub-badge';
-      badge.textContent = 'pub';
-      badge.hidden = true;
+      badge.textContent = it.rating === 'unspecified' ? '' : it.rating; // 能进相册才显示分级
+      badge.hidden = !isPublished(it);
       cap.appendChild(badge);
     }
     cap.appendChild(document.createTextNode(name));
@@ -3240,8 +3062,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 公开状态切换：先给默认值，公开状态加载完成前按钮也不会空白
     const pub = document.createElement('button');
     pub.className = 'pub-toggle';
-    pub.appendChild(icon('moon'));
-    pub.title = '设为公开（游客可见）';
+    pub.appendChild(icon(it.is_hidden ? 'moon' : 'globe'));
+    pub.title = it.is_hidden ? '已隐藏（点击取消隐藏）' : '隐藏（不进相册，直链仍可打开）';
+    pub.classList.toggle('on', !it.is_hidden);
     pub.onclick = (e) => { e.stopPropagation(); togglePublic(it.key); };
     fig.appendChild(pub);
     // 拖拽移动：多选模式下拖动已选中的图片会移动整批
@@ -3279,7 +3102,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     fig.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const on = publicKeys.has(pubRelOf(it.key));
+      const hidden = !!it.is_hidden;
       showCtxMenu(e.clientX, e.clientY, [
         { icon: 'zoom', label: '查看大图', onClick: () => openLightbox(it) },
         '-',
@@ -3287,7 +3110,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links.markdown) },
         { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
         '-',
-        { icon: on ? 'moon' : 'globe', label: on ? '取消公开' : '设为公开', onClick: () => togglePublic(it.key) },
+        { icon: hidden ? 'globe' : 'moon', label: hidden ? '取消隐藏' : '隐藏', onClick: () => togglePublic(it.key) },
         { icon: 'move', label: '移动到相册…', onClick: () => moveImagesDialog([it.key]) },
         '-',
         { icon: 'trash', label: '删除图片', danger: true, onClick: () => deleteImagesDialog([it.key]) },
@@ -3302,10 +3125,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   function updateLightboxPublicBtn() {
     if (!lightboxItem) return;
-    const on = publicKeys.has(pubRelOf(lightboxItem.key));
+    const row = itemsByKey.get(lightboxItem.key);
+    const hidden = !!(row && row.is_hidden);
     const btn = $('togglePublicBtn');
-    setIcon(btn, on ? 'moon' : 'globe');
-    setLabel(btn, on ? '取消公开' : '设为公开');
+    setIcon(btn, hidden ? 'globe' : 'moon');
+    setLabel(btn, hidden ? '取消隐藏' : '隐藏');
     btn.title = on ? '已公开（点击取消公开）' : '设为公开（游客可见）';
     btn.classList.toggle('on', on);
   }
@@ -3363,14 +3187,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     btn.disabled = true;
     setLabel(btn, '转存中…');
     try {
-      const res = await fetch(`${cfg.worker}/url`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ url }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '转存失败');
+      // 由 Worker 抓取远程图片并存进 R2（10MB 上限、15 秒超时）
+      const data = await apiSend('/api/transfer', 'POST', { url, rating: currentUploadRating() });
       input.value = '';
-      const name = data.url.split('/').pop();
+      const image = data.image;
       toast('转存成功');
-      addResult(data.url, name);
-      saveHistory(data.url, name);
+      addResult(image.url, image.filename);
+      saveHistory(image.url, image.filename);
+      // 转存的图没有缩略图（服务端生成不了），会进「批量补缩略图」的队列
+      remember(image);
+      loadGallery(true);
     } catch (e) {
       toast(e.message, true);
     } finally {
@@ -3380,11 +3206,91 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   }
 
+  // ---------- 批量补缩略图 ----------
+  // 从 COS 迁移过来的旧图没有缩略图（旧方案靠服务端图片处理，R2 没有这个能力）。
+  // 这个工具在浏览器里逐张跑：拉原图 → canvas 生成 → 上传。免费、可中断、下次接着补
+  // （补好的会自动从「还没有缩略图」的查询里消失）。
+  let backfilling = false;
+
+  /** 拉原图并生成缩略图。先 fetch 成 blob 再交给 canvas —— 这样画布同源、不被污染，toBlob 才可用 */
+  async function fetchThumbSource(url) {
+    const res = await fetch(url, { mode: 'cors' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.size) return null;
+    return await makeThumb(new File([blob], 'source', { type: blob.type }));
+  }
+
+  async function backfillThumbs() {
+    if (backfilling) return toast('补全任务正在跑', true);
+    const btn = $('backfillThumbs');
+
+    let probe;
+    try {
+      probe = await api('/api/images?thumb=missing&pageSize=1');
+    } catch (e) {
+      return toast('查询失败：' + errMsg(e), true);
+    }
+    if (!probe.total) return toast('所有图片都有缩略图了');
+
+    const ok = await confirmDialog({
+      title: '批量补缩略图',
+      message: `还有 ${probe.total} 张图没有缩略图。补全需要逐张重新下载原图、在本地生成后上传，会花一些时间并消耗下行流量。`
+        + '中途可以刷新页面中断，下次会接着补。',
+      okText: '开始补全',
+    });
+    if (!ok) return;
+
+    backfilling = true;
+    btn.disabled = true;
+    const release = beginLoad();
+    let done = 0;
+    let skipped = 0;
+    // 有些图永远生成不出缩略图（浏览器解不开的格式、超过尺寸门槛），记下来跳过，
+    // 否则每轮都会把它们捞出来，循环停不下来
+    const giveUp = new Set();
+
+    try {
+      for (;;) {
+        // 每轮都取第一页：补好的会自动从 ?thumb=missing 里消失
+        const page = await api('/api/images?thumb=missing&pageSize=5');
+        const todo = (page.images || []).filter((r) => !giveUp.has(r.id));
+        if (!todo.length) break;
+
+        for (const row of todo) {
+          setLabel(btn, `补全中 ${done + skipped}`);
+          try {
+            const blob = await fetchThumbSource(row.url);
+            if (!blob) { giveUp.add(row.id); skipped++; continue; }
+            await api('/api/images/' + row.id + '/thumb', {
+              method: 'PUT',
+              headers: { 'content-type': blob.type || 'image/webp' },
+              body: blob,
+            });
+            done++;
+          } catch (e) {
+            console.warn('[picbed] 补缩略图失败 id=' + row.id + '：' + (e.message || e));
+            giveUp.add(row.id);
+            skipped++;
+          }
+        }
+      }
+      toast(`补缩略图完成：成功 ${done} 张${skipped ? `，跳过 ${skipped} 张（格式不支持或过大）` : ''}`);
+      loadGallery(true);
+    } catch (e) {
+      toast('补缩略图中断：' + errMsg(e), true);
+    } finally {
+      backfilling = false;
+      btn.disabled = false;
+      setLabel(btn, '补缩略图');
+      release();
+    }
+  }
+
   // ---------- 设置 ----------
   function openSettings() {
-    $('setWorker').value = cfg.worker;
+    $('setWorker').value = cfg.api;
     $('setPassword').value = cfg.password;
-    $('setDomain').value = cfg.customDomain;
     $('setFormat').value = cfg.format;
     $('settingsDialog').hidden = false;
   }
@@ -3392,18 +3298,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   function closeSettings() { $('settingsDialog').hidden = true; }
 
   function applySettings() {
-    cfg.worker = $('setWorker').value.trim().replace(/\/+$/, '');
+    cfg.api = $('setWorker').value.trim().replace(/\/+$/, '');
     cfg.password = $('setPassword').value;
-    cfg.customDomain = $('setDomain').value.trim().replace(/\/+$/, '');
     cfg.format = $('setFormat').value;
-    tokenCache = null;
     invalidateAlbumTree();
-    dlOk = null; // 换了域名就重新判一次能不能自取（CORS 是域名级的，新域名可能是另一回事）
+    dlOk = null; // 换了后端就重新判一次能不能自取（CORS 是域名级的，新域名可能是另一回事）
     saveSettings();
     toast('设置已保存');
     closeSettings();
-    // 密码与 Worker 都填好才能进管理视图，否则留在公开画廊
-    switchView(cfg.worker && cfg.password ? 'admin' : 'public');
+    // 密码与后端地址都填好才能进管理视图，否则留在公开画廊
+    switchView(cfg.api && cfg.password ? 'admin' : 'public');
   }
 
   // ---------- 事件绑定 ----------
@@ -3425,8 +3329,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   };
   // 上传目标提示：悬停在子相册上时显示该相册名
   function updateDropLabel() {
-    const p = uploadTargetPrefix || galleryPrefix;
-    const name = p === cfg.prefix + '/' ? '全部图片' : (p.slice(0, -1).split('/').pop() || '全部图片');
+    const album = uploadTargetPrefix === null || uploadTargetPrefix === undefined ? galleryAlbum : uploadTargetPrefix;
+    const name = album ? album.split('/').pop() : '全部图片';
     $('dropTargetLabel').textContent = `松开鼠标，上传到「${name}」`;
   }
   let dragDepth = 0;
@@ -3477,21 +3381,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   $('urlInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') transferUrl(); });
   $('copyAllBtn').onclick = copyAllResults;
   $('settingsBtn').onclick = () => openSettings();
+  // 旧版这里是「诊断 COS 密钥权限」。现在后端只有一套 REST 接口，
+  // 所以改成直接打一次列表接口：既验证地址可达，也验证密码对不对。
   $('probeBtn').onclick = async () => {
     const out = $('probeResult');
-    out.textContent = '诊断中…';
+    out.textContent = '测试中…';
     try {
-      const res = await fetch(`${cfg.worker}/probe`, { headers: listHeaders() });
-      const data = await res.json().catch(() => ({}));
-      out.textContent = JSON.stringify(data, null, 2);
+      const data = await api('/api/images?pageSize=1');
+      out.textContent = `连接正常\n后端：${cfg.api}\n当前共 ${data.total} 张图片`;
     } catch (e) {
-      out.textContent = '诊断失败：' + e.message;
+      out.textContent = (e.status === 403 || e.status === 503 ? '密码不对或服务端未配置密码：' : '连接失败：') + errMsg(e);
     }
   };
   $('saveSettings').onclick = applySettings;
   $('closeSettings').onclick = closeSettings;
   $('settingsDialog').addEventListener('click', (e) => { if (e.target === $('settingsDialog')) closeSettings(); });
   $('refreshGallery').onclick = () => loadGallery(true);
+  $('backfillThumbs').onclick = backfillThumbs;
   $('loadMore').onclick = () => (view === 'public' ? loadPublicGallery(false) : loadGallery(false));
   $('newAlbumBtn').onclick = newAlbum;
   $('selectModeBtn').onclick = toggleSelectMode;
@@ -3505,9 +3411,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   $('tabPublic').onclick = () => { if (view !== 'public') switchView('public'); };
   $('tabAdmin').onclick = () => {
     if (view === 'admin') return;
-    if (!cfg.worker || !cfg.password) {
+    if (!cfg.api || !cfg.password) {
       openSettings();
-      toast('请填写 Worker 地址与上传密码后再进入管理视图', true);
+      toast('请填写后端地址与上传密码后再进入管理视图', true);
       return;
     }
     switchView('admin');
@@ -3562,7 +3468,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   });
 
   // ---------- 初始化 ----------
-  $('bucketInfo').textContent = `${cfg.bucket} · ${cfg.region}`;
+  $('bucketInfo').textContent = 'R2 · D1';
 
   // 顶栏高度写回 --appbar-h，供吸顶的面包屑 / 多选栏避让。
   // 用 ResizeObserver 而不是写死数值：窄屏顶栏 wrap 换行后高度会变。
@@ -3584,7 +3490,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   renderHistory();
   updateUploadFab();
   switchView(view); // 有密码直接进管理视图，否则先看公开画廊
-  if (!cfg.worker) openSettings();
+  if (!cfg.api) openSettings();
 })();
 </script>
 </body>
