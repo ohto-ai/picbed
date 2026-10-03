@@ -16,7 +16,11 @@ import * as db from './db.js';
 const CORS_PUBLIC = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  // 公开接口不需要密码，但客户端可能**顺手带上** x-picbed-key（比如同一套请求封装
+  // 统一加头）。不在预检里放行它的话，浏览器会在发请求前就把整个请求拦掉，
+  // 报「Request header field x-picbed-key is not allowed by Access-Control-Allow-Headers」。
+  // 放行一个用不上的头没有安全影响，但能避免这类整页加载失败。
+  'Access-Control-Allow-Headers': 'Content-Type, X-Picbed-Key',
   'Access-Control-Max-Age': '86400',
 };
 

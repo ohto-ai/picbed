@@ -1070,7 +1070,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   async function api(path, opts) {
     const o = opts || {};
     const headers = Object.assign({}, o.headers);
-    if (cfg.password) headers['x-picbed-key'] = cfg.password;
+    // 公开接口不带密码：它不需要鉴权，带上反而会多一次预检，
+    // 一旦服务端没在预检里放行这个头，整个请求会被浏览器拦掉（踩过一次）。
+    if (cfg.password && !path.startsWith('/api/public/')) headers['x-picbed-key'] = cfg.password;
     const res = await fetch(cfg.api + path, Object.assign({}, o, { headers }));
 
     let data = null;
