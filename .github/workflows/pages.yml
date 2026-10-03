@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir -p _site
           # worker-r2 必须显式排除：这个静态站是公开的，而后端源码（含管理页）不该被发布出去
-          rsync -a --exclude '.git' --exclude '.github' --exclude 'worker' \
+          rsync -a --exclude '.git' --exclude '.github' \
             --exclude 'worker-r2' --exclude 'scripts' --exclude 'README.md' \
             --exclude '.gitignore' --exclude '_site' \
             ./ _site/

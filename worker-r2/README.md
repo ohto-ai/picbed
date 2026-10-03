@@ -246,7 +246,7 @@ rclone size "r2:picbed-images/img"
 
 ### 迁移后作废的东西（确认切换完成后再删）
 
-- `.github/workflows/renew-cert.yml` 和 `scripts/tencent-cert-deploy.py` —— 整套证书自动化。
+- `.github/workflows/renew-cert.yml` 和 `scripts/tencent-cert-deploy.py` —— 整套证书自动化（**已删除**）。
   自定义域名由 Cloudflare 自动签发续期，不需要「上传证书 + 绑定到桶」这一步了。
 - COS 的跨域 CORS 配置、README 里的腾讯云子账号 / PicGo COS 章节。
 - 旧的 `worker/`（签 STS 那套）—— 等 `index.html` 也迁移完再删。
