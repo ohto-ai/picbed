@@ -2113,7 +2113,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const row = itemsByKey.get(fig.dataset.key);
       if (!row) return;
       const badge = fig.querySelector('.pub-badge');
-      if (badge) badge.hidden = !isPublished(row); // 文件名前的徽标：能进相册才显示
+      if (badge) {
+        // 文字也要一起更新 —— 它只在渲染卡片时设过一次，
+        // 只改 hidden 的话，改完分级看到的还是旧档位（得刷新页面才对）
+        badge.textContent = row.rating === 'unspecified' ? '' : row.rating;
+        badge.hidden = !isPublished(row); // 能进相册才显示
+      }
       fig.classList.toggle('is-hidden', !!row.is_hidden);
       const btn = fig.querySelector('.pub-toggle');
       if (btn) {
