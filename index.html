@@ -362,6 +362,16 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 #marquee { position: fixed; z-index: 65; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 4px; pointer-events: none; }
 body.marqueeing { user-select: none; -webkit-user-select: none; }
 body.marqueeing .grid figure { cursor: default; transform: none; }
+/* 敏感内容遮罩：R15/R18 默认糊住，点一下才显示（地址加 ?reveal=1 可整体放开）。
+   被遮住的卡片**不会请求图片** —— 点到才下载，不是「先下下来再糊上」。 */
+.grid figure.is-covered img { filter: blur(22px); transform: scale(1.08); }
+.grid figure.is-covered { cursor: pointer; }
+.grid figure .cover-hint {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 12, 16, .5); color: #fff;
+  font-size: 12px; letter-spacing: .1em;
+}
 /* 右键菜单 */
 #ctxMenu {
   position: fixed; z-index: 90; background: var(--glass-strong); border: 1px solid var(--border);
@@ -1646,6 +1656,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 分级档位来自 URL 的 ?rating= 参数（r15 = G+R12+R15 / r15_only = 仅 R15），
   // 是个「安静」的开关，页面上不放控件；空串表示用服务端的默认档。
   const publicRatingParam = () => new URLSearchParams(location.search).get('rating') || '';
+  // 敏感内容遮罩：出现在相册里的 R15/R18 默认糊住，点一下才显示（类似 Twitter 的做法）。
+  // 想整体放开就在地址后面加 ?reveal=1 —— 同样是个安静的参数，页面上不放控件。
+  // 注意它和 ?rating= 是两件事：rating 决定「列不列出来」，reveal 决定「糊不糊」。
+  const COVERED_RATINGS = ['R15', 'R18'];
+  const publicRevealAll = () => new URLSearchParams(location.search).get('reveal') === '1';
 
   // ---------- 图片数据缓存 ----------
   // 网格里每一项都缓存**整行数据**（id / url / thumb_url / rating / is_hidden / album），
@@ -3025,6 +3040,21 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // thumbN：缩略图边长，0 表示取原图。由调用方算一次传进来 ——
   // renderGridItem 是在循环里逐张 append 的，若在这里现算会反复触发同步布局
+  /** 揭开敏感内容遮罩：移掉覆盖层，**这之后才开始下载**这张图 */
+  function revealCover(fig, row) {
+    fig.classList.remove('is-covered');
+    const hint = fig.querySelector('.cover-hint');
+    if (hint) hint.remove();
+    const img = fig.querySelector('img');
+    if (!img) return;
+    dlLoad({
+      fig, img, epoch: dlEpoch,
+      url: row.thumb_url || row.url,
+      rawUrl: row.url, thumb: !!row.thumb_url,
+      bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
+    });
+  }
+
   function renderGridItem(it, mode) {
     const isPublic = mode === 'public';
     const fig = document.createElement('figure');
@@ -3055,13 +3085,25 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    // 下载交给下载器：它自己决定是流式自取（有百分比与增量显形）还是退回原生加载
-    dlLoad({
-      fig, img, epoch: dlEpoch,
-      url: useThumb ? thumbUrlFull : rawUrl,
-      rawUrl, thumb: useThumb,
-      bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
-    });
+    // 敏感内容遮罩：公开视图里 R15/R18 默认**连下都不下**，点一下才揭开。
+    // （不是先下下来再糊上 —— 那样图已经进了浏览器缓存，遮罩就只是块布）
+    const covered = isPublic && !publicRevealAll() && COVERED_RATINGS.includes(it.rating);
+    if (covered) {
+      fig.classList.remove('ph'); // 骨架层让位给遮罩，否则底下一直在闪
+      fig.classList.add('is-covered');
+      const hint = document.createElement('div');
+      hint.className = 'cover-hint';
+      hint.textContent = '点击查看';
+      fig.appendChild(hint);
+    } else {
+      // 下载交给下载器：它自己决定是流式自取（有百分比与增量显形）还是退回原生加载
+      dlLoad({
+        fig, img, epoch: dlEpoch,
+        url: useThumb ? thumbUrlFull : rawUrl,
+        rawUrl, thumb: useThumb,
+        bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
+      });
+    }
     // 悬停意图：停够一会儿就预取原图，点开大图时正好命中缓存（见 pfHover）
     fig.addEventListener('mouseenter', () => pfHover(it.key));
     fig.addEventListener('mouseleave', pfCancel);
@@ -3081,8 +3123,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     fig.append(img, cap);
     const links = makeLinks(publicUrl(it.key), name);
     if (isPublic) {
-      // 游客视图：只读，点击看大图
-      fig.onclick = () => openLightbox(it);
+      // 游客视图：只读。被遮住的先揭开（第一下点击不下图，是「同意查看」那一下）
+      fig.onclick = () => {
+        if (fig.classList.contains('is-covered')) return revealCover(fig, it);
+        openLightbox(it);
+      };
       fig.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
