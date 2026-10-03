@@ -358,19 +358,32 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .grid figure.selectable { cursor: pointer; }
 /* 文件名前的公开状态徽标 */
 .pub-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; line-height: 1.5; color: #fff; background: var(--ok); border-radius: 7px; padding: 0 6px; margin-right: 5px; flex: none; }
+/* 分级按档位区分颜色：一眼能看出哪些是敏感内容（G 绿 / R12 黄 / R15 橙 / R18 红 / 未分类 灰） */
+.pub-badge.r-G { background: #2ea043; }
+.pub-badge.r-R12 { background: #bb8009; }
+.pub-badge.r-R15 { background: #d2691e; }
+.pub-badge.r-R18 { background: #c93c37; }
+.pub-badge.r-unspecified { background: #6e7681; }
 /* 多选模式下的拖动框选 */
 #marquee { position: fixed; z-index: 65; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 4px; pointer-events: none; }
 body.marqueeing { user-select: none; -webkit-user-select: none; }
 body.marqueeing .grid figure { cursor: default; transform: none; }
 /* 敏感内容遮罩：R15/R18 默认糊住，点一下才显示（地址加 ?reveal=1 可整体放开）。
    被遮住的卡片**不会请求图片** —— 点到才下载，不是「先下下来再糊上」。 */
-.grid figure.is-covered img { filter: blur(22px); transform: scale(1.08); }
-.grid figure.is-covered { cursor: pointer; }
+/* 糊得很重，但底下的缩略图是真实下载的 —— 只让你看出大致轮廓，看不清内容 */
+.grid figure.is-covered { cursor: pointer; background: var(--panel-2, #222); }
+.grid figure.is-covered img { filter: blur(38px); transform: scale(1.2); }
 .grid figure .cover-hint {
   position: absolute; inset: 0; z-index: 3;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(10, 12, 16, .5); color: #fff;
-  font-size: 12px; letter-spacing: .1em;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  background: rgba(10, 12, 16, .3); /* 半透明：能透出下面那层糊掉的轮廓 */
+  color: #fff; text-align: center; padding: 10px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .65);
+}
+.grid figure .cover-hint .cover-text { font-size: 12px; line-height: 1.4; }
+.grid figure .cover-hint .cover-btn {
+  font-size: 12px; padding: 3px 14px; border-radius: 999px;
+  background: rgba(255, 255, 255, .2); border: 1px solid rgba(255, 255, 255, .5);
 }
 /* 右键菜单 */
 #ctxMenu {
@@ -2132,6 +2145,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         // 文字也要一起更新 —— 它只在渲染卡片时设过一次，
         // 只改 hidden 的话，改完分级看到的还是旧档位（得刷新页面才对）
         badge.textContent = row.rating === 'unspecified' ? '' : row.rating;
+        badge.className = 'pub-badge r-' + row.rating; // 改档位时颜色也要跟着变
         badge.hidden = !isPublished(row); // 能进相册才显示
       }
       fig.classList.toggle('is-hidden', !!row.is_hidden);
@@ -3047,10 +3061,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (hint) hint.remove();
     const img = fig.querySelector('img');
     if (!img) return;
+    delete img.dataset.raw; // 允许它重新走一次加载
+    // 到这一步才是「真的要看」—— 取原图
     dlLoad({
       fig, img, epoch: dlEpoch,
-      url: row.thumb_url || row.url,
-      rawUrl: row.url, thumb: !!row.thumb_url,
+      url: row.url, rawUrl: row.url, thumb: false,
       bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
     });
   }
@@ -3075,26 +3090,43 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // 没有缩略图的图（SVG/ICO、生成失败、还没补全的旧图）直接用原图。
     const thumbUrlFull = it.thumb_url || null;
     const useThumb = !!thumbUrlFull;
+    // 敏感内容遮罩：公开视图里 R15/R18 默认盖一层（底下一张重糊的缩略图），点一下才揭开。
+    // 提前算出来是因为下面 onerror 也要用（遮罩状态下不允许回退到原图）。
+    const covered = isPublic && !publicRevealAll() && COVERED_RATINGS.includes(it.rating);
     const img = document.createElement('img');
     img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
     // 必须先挂事件再赋 src：缓存命中时 load 可能在监听器挂上之前就派发完了
     img.onload = () => fig.classList.remove('ph');
     img.onerror = () => {
+      // 遮罩状态下只取缩略图：取不到就保持糊着，**绝不回退到原图**
+      if (covered) return;
       // 缩略图退回原图的整个过程 .ph 仍在，shimmer 自然盖住重试；原图也失败则整张卡片一起移除
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
     };
-    // 敏感内容遮罩：公开视图里 R15/R18 默认**连下都不下**，点一下才揭开。
-    // （不是先下下来再糊上 —— 那样图已经进了浏览器缓存，遮罩就只是块布）
-    const covered = isPublic && !publicRevealAll() && COVERED_RATINGS.includes(it.rating);
     if (covered) {
       fig.classList.remove('ph'); // 骨架层让位给遮罩，否则底下一直在闪
       fig.classList.add('is-covered');
       const hint = document.createElement('div');
       hint.className = 'cover-hint';
-      hint.textContent = '点击查看';
+      const txt = document.createElement('span');
+      txt.className = 'cover-text';
+      txt.textContent = '可能包含敏感内容';
+      const btn = document.createElement('span');
+      btn.className = 'cover-btn';
+      btn.textContent = '查看';
+      hint.append(txt, btn);
       fig.appendChild(hint);
+      // 只下**缩略图**（512px 那张）：能看出大致轮廓，但看不清内容。
+      // 注意 rawUrl 也指向缩略图 —— 下载器任何一条回退路径都不会去取原图。
+      if (thumbUrlFull) {
+        dlLoad({
+          fig, img, epoch: dlEpoch,
+          url: thumbUrlFull, rawUrl: thumbUrlFull, thumb: true,
+          bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
+        });
+      }
     } else {
       // 下载交给下载器：它自己决定是流式自取（有百分比与增量显形）还是退回原生加载
       dlLoad({
@@ -3116,6 +3148,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const badge = document.createElement('span');
       badge.className = 'pub-badge';
       badge.textContent = it.rating === 'unspecified' ? '' : it.rating; // 能进相册才显示分级
+      badge.className = 'pub-badge r-' + it.rating; // 按档位着色，一眼分出哪些是敏感内容
       badge.hidden = !isPublished(it);
       cap.appendChild(badge);
     }
