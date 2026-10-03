@@ -9,6 +9,11 @@ name = "picbed-r2"                  # 不能与旧的 picbed-worker 重名
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# 加了自定义域名后，wrangler 默认会**关掉** workers.dev 地址 —— 而我们切换期间
+# 线上前端还指着那个地址，所以必须显式打开。等前端改用自定义域名、且缓存都过期后，
+# 可以把它删掉（少一个公开入口）。
+workers_dev = true
+
 # ---------- 绑定 ----------
 
 [[r2_buckets]]
@@ -63,9 +68,9 @@ ALLOWED_ORIGINS = "https://picbed.ohtoai.top,https://ohto-ai.github.io,http://lo
 # 好处：管理页跟着 Worker 一起部署，不用再建一个 Pages 项目，也没有跨域问题。
 
 # ---------- 自定义域名 ----------
-# ⚠️ 等前端迁移完成后再取消注释并重新 deploy。
-# 现在打开会抢走旧 COS Worker 的域名，旧站的上传 / 相册 / 公开画廊会当场全部失效。
-#
-# [[routes]]
-# pattern = "picbed-worker.ohtoai.top"
-# custom_domain = true
+# 前端已经迁移完毕（站点只跟这个 Worker 打交道），所以这里接管旧的 Worker 域名。
+# 注意：接管后，缓存着旧版页面的浏览器会调不到 /token（旧 Worker 的接口），
+# 需要硬刷新一次 —— 这是切换时的一次性副作用。
+[[routes]]
+pattern = "picbed-worker.ohtoai.top"
+custom_domain = true

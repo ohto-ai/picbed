@@ -2,8 +2,9 @@
 // 页面上「设置」里修改的项会存到浏览器本地，优先级高于这里
 window.PICBED_CONFIG = {
   // 必填：图床后端（Cloudflare Worker）地址
-  // 迁移期间先用 workers.dev 域名，等域名切换后再改成 https://picbed-worker.ohtoai.top
-  api: 'https://picbed-r2.ohtoai02.workers.dev',
+  // 这个域名原本属于旧的 COS Worker，现已切换给新的 R2 后端。
+  // （切换期间 workers.dev 地址也保持可用，避免缓存里的旧 config.js 失效）
+  api: 'https://picbed-worker.ohtoai.top',
 
   // 图片访问域名：R2 桶的自定义域名，图片字节从这里直出（不经过 Worker）
   imageBase: 'https://img.ohtoai.top',
