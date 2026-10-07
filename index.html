@@ -624,6 +624,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 8h9M18.5 8H20M4 16h4M13.5 16H20"/><circle cx="16" cy="8" r="2.5"/><circle cx="10.5" cy="16" r="2.5"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="M8 12l4 4 4-4"/><path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/><path d="M12 10.5v6M9 13.5h6"/></symbol>
   <symbol id="i-folder-upload" viewBox="0 0 24 24"><path d="M21.5 18.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h4.8l2 3h8.2a2 2 0 0 1 2 2z"/><path d="M12 17v-6M9.5 13.5L12 11l2.5 2.5"/></symbol>
@@ -838,6 +839,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         <button class="btn small" data-fmt="url"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">URL</span></button>
         <button class="btn small" data-fmt="markdown"><svg class="ic"><use href="#i-md"/></svg><span class="lbl">Markdown</span></button>
         <button class="btn small" data-fmt="html"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">HTML</span></button>
+        <button class="btn small" id="downloadBtn" title="保存到本地，文件名用显示名"><svg class="ic"><use href="#i-download"/></svg><span class="lbl">下载</span></button>
         <label class="btn small admin-only" id="lightboxRatingWrap" title="分级只影响相册里的陈列，不影响直链">分级
           <select id="lightboxRating" style="background:transparent;border:0;color:inherit;font:inherit;padding:0 2px;outline:none;">
             <option value="unspecified">未分类</option>
@@ -1105,9 +1107,24 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return false;
   }
 
+  /**
+   * 复制用的三种格式。alt 一律用**显示名**（那一行的 filename），也就是这张图在界面上的名字。
+   *
+   * 两种格式的转义规则不一样，不能共用一份：
+   *   * markdown 的 alt 是方括号里的文本，`]` 会提前把它结束 → 反斜杠转义；
+   *   * html 的 alt 是属性值，`"` 会把属性截断，`&`/`<` 会被当成实体/标签 → 转义成实体。
+   * 早先的写法是把 `[]()` 直接从名字里删掉：既丢信息（括号在文件名里很常见），
+   * 又挡不住显示名里的 `"` 把 html 的 alt 截断。
+   */
   function makeLinks(url, name) {
-    const alt = String(name || 'image').replace(/[\[\]()]/g, '');
-    return { url, markdown: `![${alt}](${url})`, html: `<img src="${url}" alt="${alt}" />` };
+    const display = String(name || 'image');
+    const mdAlt = display.replace(/[\\[\]]/g, '\\$&');
+    const htmlAlt = display
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    return { url, markdown: `![${mdAlt}](${url})`, html: `<img src="${url}" alt="${htmlAlt}" />` };
   }
 
   // ---------- 相册名 ----------
@@ -2264,18 +2281,22 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   /**
-   * 重命名图片：只改**展示用的文件名**。
-   * r2_key 是不可变的（这是「分享出去的链接永不失效」的前提），所以直链不会变 ——
+   * 重命名图片：改的是**这张图的名字**（D1 的 filename 列），它有三个用处 ——
+   * 卡片与灯箱的标题、复制 Markdown/HTML 时的 alt、以及「下载」存盘时的文件名。
+   *
+   * r2_key 保持不可变（这是「分享出去的链接永不失效」的前提），所以直链不会变 ——
    * 这也是为什么它和「相册重命名」一样，属于纯元数据改动。
+   * 想让名字真的落到存盘的文件上，走的是灯箱里的下载按钮：右键「图片另存为」的名字
+   * 由浏览器按 URL 决定，服务端影响不了（详见 downloadImage 的注释）。
    */
   async function renameImage(key) {
     const row = itemsByKey.get(key);
     if (!row) return;
     const raw = await promptDialog({
       title: '重命名图片',
-      label: '新的文件名',
+      label: '新的名称',
       value: row.filename || '',
-      help: '只改显示用的名字。图片直链不会变，之前分享出去的链接照样有效。',
+      help: '用在卡片标题、复制出去的 alt、以及「下载」存盘的文件名上。图片直链不会变，之前分享出去的链接照样有效。',
       confirmText: '重命名',
     });
     if (raw === null) return;
@@ -2292,7 +2313,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         [...cap.childNodes].forEach((n) => { if (n.nodeType === 3) n.remove(); });
         cap.appendChild(document.createTextNode(name));
       }
-      toast('已重命名（直链不变）');
+      toast('已重命名（直链不变；下载存盘也用这个名字）');
     } catch (e) {
       toast('重命名失败：' + errMsg(e), true);
     }
@@ -3407,9 +3428,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     dlStream(lightboxJob, dlBoxSink(lightboxJob)).catch(() => {});
     // 显示原始文件名（键是时间戳+随机，对人不友好）；重命名后这里也会跟着变
     $('lightboxName').textContent = item.filename || item.key;
+    // alt 用**显示名**（没有才退到键的最后一段 —— 那串时间戳+随机是给人看的最差选择）
+    const links = makeLinks(url, item.filename || item.key.split('/').pop());
     document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
-      b.onclick = () => copyText(makeLinks(url, item.key.split('/').pop())[b.dataset.fmt]);
+      b.onclick = () => copyText(links[b.dataset.fmt]);
     });
+    $('downloadBtn').onclick = () => downloadImage(item, $('downloadBtn'));
     // 游客视图只读：隐藏删除与公开切换
     const isAdmin = view === 'admin';
     $('deleteBtn').hidden = !isAdmin;
@@ -3434,6 +3458,61 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('lightboxDl').hidden = true;
     $('lightbox').hidden = true;
     lightboxItem = null;
+  }
+
+  /**
+   * 存盘用的文件名：以显示名为准，它没写扩展名就把真实的补上。
+   * 补扩展名是因为显示名是自己起的（可能就叫「风景 01」），那样存下来没有扩展名，
+   * 系统不给它配图标、也不好双击打开。非法字符换成 _ —— 显示名里允许有它们（它只是界面文本），
+   * 但当文件名用会被系统拦下或悄悄替换掉。
+   */
+  function downloadName(item) {
+    const base = String(item.filename || item.key.split('/').pop() || 'image')
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+      .trim() || 'image';
+    if (/\.[A-Za-z0-9]{1,8}$/.test(base)) return base; // 已经带扩展名了：尊重用户起的名字
+    const ext = /\.[^./]+$/.exec(item.key);
+    return base + (ext ? ext[0] : '');
+  }
+
+  /**
+   * 下载这张图 —— 先把字节取成 blob 再存盘，为的是能控制存下来的文件名。
+   *
+   * 为什么不直接写 `<a href="直链" download="名字">`：
+   *   1. download 属性只在**同源**下生效，图在 img.ohtoai.top、页面在 picbed.ohtoai.top，会被忽略；
+   *   2. 服务端也没法可靠地把名字告诉浏览器：Content-Disposition 的 `inline; filename=`
+   *      不被「图片另存为」采纳（规范只保证 attachment 会预填对话框），而 attachment 会强制下载、
+   *      图片再也不能内嵌显示 —— 对图床是自毁。
+   * 自己取成 blob 就没这些限制：blob 是本站源的，download 一定生效，什么浏览器都按这个名字存。
+   * 字节要过一遍 JS，但多半不用走网络：灯箱刚用同一个 URL 下过原图，服务端给了 Cache-Control，
+   * 这一趟基本命中 HTTP 缓存。
+   */
+  async function downloadImage(item, btn) {
+    const name = downloadName(item);
+    const url = item.url || publicUrl(item.key);
+    const label = btn && btn.querySelector('.lbl');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = '下载中…';
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = name;
+      document.body.appendChild(a); // Firefox 要求节点在文档里才认这次点击
+      a.click();
+      a.remove();
+      // 延后回收：click() 之后浏览器才去读这个 blob，立刻 revoke 会把下载打断
+      setTimeout(() => URL.revokeObjectURL(objUrl), 30000);
+      toast('已保存 ' + name);
+    } catch (e) {
+      toast('下载失败：' + errMsg(e), true);
+    } finally {
+      if (btn) btn.disabled = false;
+      if (label) label.textContent = '下载';
+    }
   }
 
   // ---------- URL 转存 ----------

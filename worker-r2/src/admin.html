@@ -525,7 +525,8 @@ $('#list').addEventListener('click', async (e) => {
   if (!img) return;
 
   if (btn.dataset.act === 'url') return copyText(img.url);
-  if (btn.dataset.act === 'md') return copyText(`![${img.filename}](${img.url})`);
+  // alt 用显示名；`]` 和 `\` 要转义，否则名字里的方括号会把这个链接提前结束
+  if (btn.dataset.act === 'md') return copyText(`![${String(img.filename).replace(/[\\[\]]/g, '\\$&')}](${img.url})`);
 
   if (btn.dataset.act === 'del') {
     if (!confirm(`确定删除这张图？\n\n${img.filename}\n\nR2 里的文件和数据库记录都会删掉，不可恢复。`)) return;
