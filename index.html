@@ -840,6 +840,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         <button class="btn small" data-fmt="markdown"><svg class="ic"><use href="#i-md"/></svg><span class="lbl">Markdown</span></button>
         <button class="btn small" data-fmt="html"><svg class="ic"><use href="#i-code"/></svg><span class="lbl">HTML</span></button>
         <button class="btn small" id="downloadBtn" title="保存到本地，文件名用显示名"><svg class="ic"><use href="#i-download"/></svg><span class="lbl">下载</span></button>
+        <button class="btn small admin-only" id="renameBtn" title="改图片的名字（用在标题、alt、下载存盘名上）"><svg class="ic"><use href="#i-pencil"/></svg><span class="lbl">重命名</span></button>
         <label class="btn small admin-only" id="lightboxRatingWrap" title="分级只影响相册里的陈列，不影响直链">分级
           <select id="lightboxRating" style="background:transparent;border:0;color:inherit;font:inherit;padding:0 2px;outline:none;">
             <option value="unspecified">未分类</option>
@@ -1723,8 +1724,17 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   async function patchImage(id, patch) {
     const data = await apiSend('/api/images/' + id, 'PATCH', patch);
     invalidateListCache();
-    if (data && data.image) remember(data.image);
-    return data && data.image;
+    const image = data && data.image;
+    if (image) {
+      // ⚠️ 必须**就地更新** itemsByKey 里那一行，不能换成接口返回的新对象：
+      // 卡片上每个处理器（点击开灯箱、右键菜单、悬停预取）捕获的都是渲染时的那个行对象，
+      // 换掉 map 里那份之后，它们还指着旧的 —— 表现是「改完名字点开还是旧名字」，
+      // 而按 key 回查的路径（改分级、隐藏、灯箱里的当前状态）拿到的却已经是新的，两边对不上。
+      const cur = itemsByKey.get(image.key);
+      if (cur) Object.assign(cur, image);
+      else remember(image); // map 里还没有（正常不该发生）：至少别丢了这一行
+    }
+    return image;
   }
 
   // 这里原本还有一套「重名冲突」流程（比对内容、覆盖/自动改名/跳过）。
@@ -2313,6 +2323,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         [...cap.childNodes].forEach((n) => { if (n.nodeType === 3) n.remove(); });
         cap.appendChild(document.createTextNode(name));
       }
+      // 灯箱正开着这张图（从灯箱里改的名）：标题和复制按钮都要重绑，
+      // 否则标题还挂着旧名字、复制出去的还是旧 alt
+      if (lightboxItem && lightboxItem.key === key) bindLightboxName(row);
       toast('已重命名（直链不变；下载存盘也用这个名字）');
     } catch (e) {
       toast('重命名失败：' + errMsg(e), true);
@@ -3307,7 +3320,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     cap.appendChild(document.createTextNode(name));
     fig.append(img, cap);
-    const links = makeLinks(publicUrl(it.key), name);
+    // 链接**到点击时现算**，不要在渲染时算成常量：重命名会就地改 it.filename，
+    // 而渲染时算好的那份会一直停在旧名字上 —— 表现是「改完名字，右键复制的 alt 还是旧的」。
+    const links = () => makeLinks(rawUrl, it.filename || it.key.split('/').pop());
     if (isPublic) {
       // 游客视图：只读。被遮住的先揭开（第一下点击不下图，是「同意查看」那一下）
       fig.onclick = () => {
@@ -3320,9 +3335,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         showCtxMenu(e.clientX, e.clientY, [
           { icon: 'zoom', label: '查看大图', onClick: () => openLightbox(it) },
           '-',
-          { icon: 'link', label: '复制 URL', onClick: () => copyText(links.url) },
-          { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links.markdown) },
-          { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
+          { icon: 'link', label: '复制 URL', onClick: () => copyText(links().url) },
+          { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links().markdown) },
+          { icon: 'code', label: '复制 HTML', onClick: () => copyText(links().html) },
+          '-',
+          { icon: 'download', label: '下载', onClick: () => downloadImage(it) },
         ]);
       });
       return fig;
@@ -3374,9 +3391,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       showCtxMenu(e.clientX, e.clientY, [
         { icon: 'zoom', label: '查看大图', onClick: () => openLightbox(it) },
         '-',
-        { icon: 'link', label: '复制 URL', onClick: () => copyText(links.url) },
-        { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links.markdown) },
-        { icon: 'code', label: '复制 HTML', onClick: () => copyText(links.html) },
+        { icon: 'link', label: '复制 URL', onClick: () => copyText(links().url) },
+        { icon: 'md', label: '复制 Markdown', onClick: () => copyText(links().markdown) },
+        { icon: 'code', label: '复制 HTML', onClick: () => copyText(links().html) },
+        { icon: 'download', label: '下载', onClick: () => downloadImage(it) },
         '-',
         { icon: hidden ? 'globe' : 'moon', label: hidden ? '取消隐藏' : '隐藏', onClick: () => togglePublic(it.key) },
         '-',
@@ -3398,6 +3416,23 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // ---------- 灯箱 ----------
   let lightboxItem = null;
   let lightboxJob = null; // 灯箱大图当前那次下载（关灯箱时掐掉）
+
+  /**
+   * 把「这张图叫什么」相关的东西绑到灯箱上：标题 + 三个复制按钮。
+   *
+   * 单独拎成一个函数，是因为**改名之后必须重绑一次** —— 复制按钮的 onclick 捕获的是当时算好的
+   * links，不重绑的话，从灯箱里改完名字再复制，粘出去还是旧 alt（灯箱不关就看不出问题）。
+   */
+  function bindLightboxName(item) {
+    const url = publicUrl(item.key);
+    // 显示名字（键是时间戳+随机，对人不友好）
+    $('lightboxName').textContent = item.filename || item.key;
+    // alt 用**显示名**（没有才退到键的最后一段 —— 那串时间戳+随机是给人看的最差选择）
+    const links = makeLinks(url, item.filename || item.key.split('/').pop());
+    document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
+      b.onclick = () => copyText(links[b.dataset.fmt]);
+    });
+  }
 
   function updateLightboxPublicBtn() {
     if (!lightboxItem) return;
@@ -3426,17 +3461,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('lightboxDl').hidden = true;
     lightboxJob = { img, url, rawUrl: url, thumb: false, epoch: dlEpoch, bytes: 0, total: 0, pct: 0, started: false, blobUrl: null };
     dlStream(lightboxJob, dlBoxSink(lightboxJob)).catch(() => {});
-    // 显示原始文件名（键是时间戳+随机，对人不友好）；重命名后这里也会跟着变
-    $('lightboxName').textContent = item.filename || item.key;
-    // alt 用**显示名**（没有才退到键的最后一段 —— 那串时间戳+随机是给人看的最差选择）
-    const links = makeLinks(url, item.filename || item.key.split('/').pop());
-    document.querySelectorAll('.lightbox-actions [data-fmt]').forEach((b) => {
-      b.onclick = () => copyText(links[b.dataset.fmt]);
-    });
+    bindLightboxName(item);
     $('downloadBtn').onclick = () => downloadImage(item, $('downloadBtn'));
-    // 游客视图只读：隐藏删除与公开切换
+    $('renameBtn').onclick = () => renameImage(item.key);
+    // 游客视图只读：隐藏删除、重命名与公开切换
     const isAdmin = view === 'admin';
     $('deleteBtn').hidden = !isAdmin;
+    $('renameBtn').hidden = !isAdmin;
     $('togglePublicBtn').hidden = !isAdmin;
     $('lightboxRatingWrap').hidden = !isAdmin;
     if (isAdmin) {
@@ -3493,6 +3524,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     const label = btn && btn.querySelector('.lbl');
     if (btn) btn.disabled = true;
     if (label) label.textContent = '下载中…';
+    else toast('正在下载…'); // 右键菜单那条路没有按钮可以显示状态，只能靠 toast（大图会等一会儿）
     try {
       const res = await fetch(url, { mode: 'cors' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
