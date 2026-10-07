@@ -1038,17 +1038,21 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return seq;
   }
 
+  // 收起骨架层。不判所有权：reset 时网格要重画，先确保上一轮铺的东西不在屏幕上
+  function clearSkeleton() {
+    const layer = $('gallerySkeleton');
+    layer.hidden = true;
+    layer.textContent = '';
+    layer.removeAttribute('style'); // 位置/宽高是上一轮量的，留着会误导下一轮
+  }
+
   // 只有「最新一次」加载有权收尾：先返回的旧请求不能把新请求的骨架撤掉，
   // 否则点相册与点刷新两次 reset 重叠时会退回空白网格 —— 正是要修的那个问题。
   function hideGridLoader(seq) {
     if (!seq || seq !== gridLoaderOwner) return;
     $('galleryBusy').hidden = true;
     $('galleryCount').hidden = false;
-    // 最新的 owner 收尾时把骨架层整个收掉（含它继承来的上一轮残留）
-    const layer = $('gallerySkeleton');
-    layer.hidden = true;
-    layer.textContent = '';
-    layer.removeAttribute('style'); // 位置/宽高是上一轮量的，留着会误导下一轮
+    clearSkeleton(); // 最新的 owner 收尾时把骨架层整个收掉（含它继承来的上一轮残留）
   }
 
   async function copyText(text) {
@@ -1389,6 +1393,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     } catch (e) {
       console.warn('[picbed] 缩略图没传成：', e.message || e);
     }
+    invalidateListCache(); // 相册里多了一张，缓存那份列表已经旧了
     return image;
   }
 
@@ -1676,12 +1681,15 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // 批量改动。后端单次上限 500 条，前端按 500 分块（「跨页全选」很容易超）
   const BULK_CHUNK = 500;
+  // 改完之后列表缓存就旧了：立刻作废，免得下次进相册先闪一眼改动前的内容
+  // （就算这里漏了某处也不会显示错 —— 后台那道刷新会把结果纠正回来）
   async function bulkUpdate(ids, patch) {
     let n = 0;
     for (let i = 0; i < ids.length; i += BULK_CHUNK) {
       const r = await apiSend('/api/images/bulk', 'POST', Object.assign({ ids: ids.slice(i, i + BULK_CHUNK) }, patch));
       n += r.updated || 0;
     }
+    invalidateListCache();
     return n;
   }
   async function bulkDelete(ids) {
@@ -1690,12 +1698,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       const r = await apiSend('/api/images/bulk', 'POST', { ids: ids.slice(i, i + BULK_CHUNK), delete: true });
       n += r.deleted || 0;
     }
+    invalidateListCache();
     return n;
   }
 
-  /** 单张改分级 / 隐藏状态，成功后把本地的行更新掉 */
+  /** 单张改分级 / 隐藏状态 / 改名，成功后把本地的行更新掉 */
   async function patchImage(id, patch) {
     const data = await apiSend('/api/images/' + id, 'PATCH', patch);
+    invalidateListCache();
     if (data && data.image) remember(data.image);
     return data && data.image;
   }
@@ -1949,16 +1959,97 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // 每页张数：接口的 pageSize 硬上限是 200（传大了会被夹到 200）
   const PAGE_SIZE = 100;
 
+  // ---------- 相册列表缓存：先把上次那份画上，后台再刷新 ----------
+  // 进过的相册把**第一页**记在内存里：再进时直接拿它把网格画满 —— 缩略图多半也还在 HTTP 缓存里，
+  // 基本是秒出，骨架于是只留给从没看过的相册。后台照常请求，结果一模一样就不碰 DOM
+  // （重画会让每张缩略图重新闪一次骨架），不一样才原地换掉。
+  // 增删改一律清空整个缓存：个人站就这几个相册，不值得做细粒度失效；
+  // 万一漏了哪一处也不会显示错东西 —— 后台那道刷新会把结果纠正回来。
+  const listCache = new Map();    // key -> { total, folders, images, sig }
+  const listInflight = new Map(); // key -> Promise：悬停预取与正式加载共用同一次请求
+
+  function listKey(mode, album) {
+    return mode === 'public' ? `pub|${publicRatingParam()}|${album}` : `adm|${album}`;
+  }
+
+  /** 列表内容指纹：只取「变了就该重画」的那几列 */
+  function listSig(images) {
+    return images.map((r) => [r.id, r.rating, r.is_hidden, r.filename, r.thumb_url || ''].join('\u0001')).join('\u0002');
+  }
+
+  function invalidateListCache() { listCache.clear(); }
+
+  function listUrl(mode, album, page) {
+    const qs = new URLSearchParams({ album, page: String(page), pageSize: String(PAGE_SIZE) });
+    // 分级档位只从 URL 的 ?rating= 来（r15 = G+R12+R15，r15_only = 仅 R15），页面上不放控件
+    if (mode === 'public') {
+      const rating = publicRatingParam();
+      if (rating) qs.set('rating', rating);
+    }
+    return (mode === 'public' ? '/api/public/images?' : '/api/images?') + qs.toString();
+  }
+
+  function cacheList(mode, album, data) {
+    listCache.set(listKey(mode, album), {
+      total: data.total || 0,
+      folders: data.folders || [],
+      images: data.images || [],
+      sig: listSig(data.images || []),
+    });
+  }
+
+  /** 鼠标停在相册卡片上就把那一页拉回来：点下去多半正好命中（已缓存/在途都不会重发） */
+  function prefetchAlbum(mode, album) {
+    const key = listKey(mode, album);
+    if (listCache.has(key) || listInflight.has(key)) return;
+    const p = api(listUrl(mode, album, 1))
+      .then((data) => { cacheList(mode, album, data); return data; })
+      .catch(() => null) // 预取失败无所谓：点进去照旧走正常流程
+      .finally(() => listInflight.delete(key));
+    listInflight.set(key, p);
+  }
+
+  /** 取一页列表。第一页可能撞上悬停预取：那就等那一份，别发第二次请求 */
+  async function fetchList(mode, album, page) {
+    if (page === 1) {
+      const pending = listInflight.get(listKey(mode, album));
+      if (pending) {
+        const data = await pending;
+        if (data) return data;
+      }
+    }
+    return await api(listUrl(mode, album, page));
+  }
+
+  /** 把一份列表画进网格：缓存命中时先画它，接口回来后内容有变也走这里重画 */
+  function renderList(mode, data) {
+    const grid = $('galleryGrid');
+    // 子相册由接口随第一页一起给，翻页时不追加
+    for (const f of data.folders || []) {
+      grid.appendChild(mode === 'public' ? renderPublicFolderTile(f.album, f.n) : renderFolderTile(f.album, f.n));
+    }
+    for (const row of data.images || []) {
+      remember(row);
+      grid.appendChild(renderGridItem(row, mode));
+    }
+  }
+
   async function loadGallery(reset) {
     if (!needWorker()) return; // 提前返回前不作废在途请求：这条路不清网格，让它照常渲染
     const seq = ++galleryReqSeq; // 本次加载取得所有权，所有在途请求就此作废
     const album = galleryAlbum; // 快照：await 期间用户可能已经切到别的相册
+    const cached = reset ? listCache.get(listKey('admin', album)) : null;
     if (reset) {
       galleryPage = 1;
       galleryLoaded = 0;
+      clearSkeleton(); // 上一轮可能还铺着：这一轮要么重铺，要么直接用缓存画
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 和在途下载成对：卡片都没了，就别再往下下（blob 也在这里一起回收）
       clearSelection();
+      if (cached) {
+        renderList('admin', cached); // 先画上次那份：用户立刻看到真实卡片，而不是一屏灰格子
+        galleryLoaded = cached.images.length;
+      }
     } else {
       galleryPage++;
     }
@@ -1966,28 +2057,35 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     // （空的面包屑比填满后矮约 29px，量早了会多算一行骨架）
     renderBreadcrumb();
     const release = beginLoad();
-    const gridSeq = showGridLoader(reset
+    // 命中缓存就不摆加载态：内容是现成的，后台那次刷新不该在屏幕上闪
+    const gridSeq = cached ? 0 : showGridLoader(reset
       ? { skeleton: true, text: '正在加载相册…' }
       : { text: `正在加载更多…（已显示 ${galleryLoaded} 张）` });
     const btn = $('loadMore');
     loadMoreState(true);
     try {
-      const qs = new URLSearchParams({ album, page: String(galleryPage), pageSize: String(PAGE_SIZE) });
-      const data = await api('/api/images?' + qs.toString());
+      const data = await fetchList('admin', album, galleryPage);
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
-      if (reset) {
-        // 子相册由接口随第一页一起给，翻页时不追加
-        for (const f of data.folders || []) $('galleryGrid').appendChild(renderFolderTile(f.album, f.n));
-      }
       const items = data.images || [];
-      for (const row of items) {
-        remember(row);
-        $('galleryGrid').appendChild(renderGridItem(row, ''));
+      if (reset) {
+        cacheList('admin', album, data);
+        // 和缓存那份一模一样就一个节点都不碰：重画会让每张缩略图重新闪一次骨架
+        if (!cached || cached.sig !== listSig(items) || cached.total !== (data.total || 0)) {
+          $('galleryGrid').textContent = '';
+          dlCancelAll();
+          renderList('admin', data);
+        }
+        galleryLoaded = items.length;
+      } else {
+        for (const row of items) {
+          remember(row);
+          $('galleryGrid').appendChild(renderGridItem(row, 'admin'));
+        }
+        galleryLoaded += items.length;
       }
       galleryTotal = data.total || 0;
       galleryMaxPage = Math.max(1, Math.ceil(galleryTotal / PAGE_SIZE));
-      galleryLoaded += items.length;
       $('galleryCount').textContent = galleryTotal > 0
         ? `已显示 ${galleryLoaded} / ${galleryTotal} 张`
         : '这个相册还是空的';
@@ -2018,11 +2116,17 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   async function loadPublicGallery(reset) {
     const seq = ++galleryReqSeq; // 与 loadGallery 共用世代号：网格是同一个
+    const cached = reset ? listCache.get(listKey('public', publicAlbum)) : null;
     if (reset) {
       publicPage = 1;
       publicLoaded = 0;
+      clearSkeleton();
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 同上：网格清了，在途的缩略图请求与 blob 一起收掉
+      if (cached) {
+        renderList('public', cached); // 同上：先把上次那份画上
+        publicLoaded = cached.images.length;
+      }
     } else {
       publicPage++;
     }
@@ -2036,31 +2140,34 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
     renderBreadcrumb(); // 同上：先渲染，骨架才量得准
     const release = beginLoad();
-    const gridSeq = showGridLoader(reset
+    // 命中缓存就不摆加载态（同 loadGallery）
+    const gridSeq = cached ? 0 : showGridLoader(reset
       ? { skeleton: true, text: '正在加载公开画廊…' }
       : { text: `正在加载更多…（已显示 ${publicLoaded} 张）` });
     const btn = $('loadMore');
     loadMoreState(true);
     try {
-      const qs = new URLSearchParams({ album: publicAlbum, page: String(publicPage), pageSize: String(PAGE_SIZE) });
-      // 分级档位只从 URL 的 ?rating= 来（r15 = G+R12+R15，r15_only = 仅 R15），页面上不放控件
-      const rating = publicRatingParam();
-      if (rating) qs.set('rating', rating);
-
-      const data = await api('/api/public/images?' + qs.toString());
+      const data = await fetchList('public', publicAlbum, publicPage);
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
-      if (reset) {
-        for (const f of data.folders || []) $('galleryGrid').appendChild(renderPublicFolderTile(f.album, f.n));
-      }
       const files = data.images || [];
-      for (const row of files) {
-        remember(row);
-        $('galleryGrid').appendChild(renderGridItem(row, 'public'));
+      if (reset) {
+        cacheList('public', publicAlbum, data);
+        if (!cached || cached.sig !== listSig(files) || cached.total !== (data.total || 0)) {
+          $('galleryGrid').textContent = '';
+          dlCancelAll();
+          renderList('public', data);
+        }
+        publicLoaded = files.length;
+      } else {
+        for (const row of files) {
+          remember(row);
+          $('galleryGrid').appendChild(renderGridItem(row, 'public'));
+        }
+        publicLoaded += files.length;
       }
       publicTotal = data.total || 0;
       publicMaxPage = Math.max(1, Math.ceil(publicTotal / PAGE_SIZE));
-      publicLoaded += files.length;
       $('galleryCount').textContent = publicTotal > 0
         ? `已显示 ${publicLoaded} / ${publicTotal} 张公开图片`
         : '这里还没有可看的图片';
@@ -2095,6 +2202,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     fig.append(iconEl, cap);
     const open = () => { publicAlbum = album; syncAlbumUrl(false); loadPublicGallery(true); };
     fig.onclick = open;
+    // 悬停即预取：停一下就把那一页拉回来，点进去多半正好命中（见 prefetchAlbum）
+    fig.addEventListener('mouseenter', () => prefetchAlbum('public', album));
     // 右键：相册本身是可以分享的（地址栏里带着 album 参数）
     fig.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -2382,6 +2491,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     try {
       const r = await apiSend('/api/albums/rename', 'POST', { from, to });
       invalidateAlbumTree();
+      invalidateListCache(); // 相册名变了，缓存里那些条目的 album 也旧了
       toast(`已移到「${to || '根目录'}」，${r.changed} 张图受影响（直链不变）`);
       // 当前正待在被移动的相册里时，跟着导航过去
       if (inSubtree(galleryAlbum, from)) galleryAlbum = to + galleryAlbum.slice(from.length);
@@ -2519,6 +2629,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     actions.append(rename, move, del);
     fig.append(iconEl, actions, cap);
     fig.onclick = () => { galleryAlbum = album; loadGallery(true); };
+    // 悬停即预取：停一下就把那一页拉回来，点进去多半正好命中（见 prefetchAlbum）
+    fig.addEventListener('mouseenter', () => prefetchAlbum('admin', album));
     // 右键菜单：与悬浮按钮相同的操作
     fig.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -3417,6 +3529,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
               headers: { 'content-type': blob.type || 'image/webp' },
               body: blob,
             });
+            invalidateListCache(); // 这张的 thumb_url 变了，缓存的列表里还是 NULL
             done++;
           } catch (e) {
             console.warn('[picbed] 补缩略图失败 id=' + row.id + '：' + (e.message || e));
