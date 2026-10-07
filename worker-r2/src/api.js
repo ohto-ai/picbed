@@ -261,7 +261,8 @@ export function shape(row, env) {
 
 /**
  * POST /api/upload
- * 裸 body 上传；文件名放 X-Filename（非 ASCII 要 URL 编码），可选 X-Rating / X-Album。
+ * 裸 body 上传；文件名放 X-Filename（非 ASCII 要 URL 编码），
+ * 可选 query 参数 `?rating=` 与 `?album=`。
  */
 export async function handleUpload(request, env) {
   const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
@@ -276,17 +277,17 @@ export async function handleUpload(request, env) {
 
   const contentType = (request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
 
-  // 分级和相册走 query 参数（`?rating=&album=`），请求头写法仍然兼容。用 query 的两个原因：
+  // 分级和相册走 query 参数（`?rating=&album=`）。为什么不用请求头：
   //   1. HTTP 头只能放 Latin-1，中文相册名得先 URL 编码再由服务端解回来，绕；
   //   2. 头里区分不出「没传」和「传了空值」，而 album= 空串正是「传到根目录」这个有效意图。
   const q = new URL(request.url).searchParams;
 
-  let rating = String(q.get('rating') || request.headers.get('x-rating') || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
+  let rating = String(q.get('rating') || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
   if (!RATINGS.includes(rating)) rating = 'unspecified';
 
   // 相册只写数据库列，不进键：键保持不透明不可变，之后随便改相册都不会动直链。
   // 完全不指定时才按日期归档（YYYY/MM/DD），与迁移过来的老图保持同一套相册命名。
-  const albumRaw = q.has('album') ? q.get('album') : headerText(request, 'x-album') || null;
+  const albumRaw = q.has('album') ? q.get('album') : null;
   const album = albumRaw === null ? dateAlbum() : safeAlbum(albumRaw);
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
@@ -425,14 +426,14 @@ function childFolders(rows, album) {
     .sort((a, b) => a.album.localeCompare(b.album, 'zh'));
 }
 
-/** PATCH /api/images/:id —— 改隐藏状态和/或分级（两个维度独立，可只改一个） */
+/** PATCH /api/images/:id —— 改 is_hidden / rating / album / filename，可只传其中几个 */
 export async function handleUpdate(request, env, id) {
   const { body, error: jsonError } = await readJson(request);
   if (jsonError) return jsonErr(400, jsonError);
 
   const { patch, error } = readPatch(body);
   if (error) return jsonErr(400, error);
-  if (!Object.keys(patch).length) return jsonErr(400, '没有要修改的字段（只接受 is_hidden / rating）');
+  if (!Object.keys(patch).length) return jsonErr(400, '没有要修改的字段（接受 is_hidden / rating / album / filename）');
 
   const changed = await db.updateImages(env, [id], patch);
   if (!changed) return jsonErr(404, '没有这条记录');
@@ -441,7 +442,7 @@ export async function handleUpdate(request, env, id) {
   return jsonAdmin({ image: shape(row, env) });
 }
 
-/** POST /api/images/bulk —— 批量：{ ids, is_hidden?, rating? } 或 { ids, delete: true } */
+/** POST /api/images/bulk —— 批量：{ ids, is_hidden?, rating?, album?, filename? } 或 { ids, delete: true } */
 export async function handleBulk(request, env) {
   const { body, error: jsonError } = await readJson(request);
   if (jsonError) return jsonErr(400, jsonError);
@@ -461,7 +462,7 @@ export async function handleBulk(request, env) {
 
   const { patch, error } = readPatch(body);
   if (error) return jsonErr(400, error);
-  if (!Object.keys(patch).length) return jsonErr(400, '没有要修改的字段（只接受 is_hidden / rating）');
+  if (!Object.keys(patch).length) return jsonErr(400, '没有要修改的字段（接受 is_hidden / rating / album / filename）');
 
   const changed = await db.updateImages(env, ids, patch);
   return jsonAdmin({ updated: changed });

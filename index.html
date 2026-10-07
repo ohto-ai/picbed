@@ -14,6 +14,7 @@
   --muted: #667085;
   /* 面板与描边（半透明，配合 backdrop-filter 做毛玻璃） */
   --panel: #ffffff;
+  --panel-2: #eceff6; /* 比 --panel 沉一档的面：遮罩卡片压在它上面 */
   --glass: rgba(255, 255, 255, 0.72);
   --glass-strong: rgba(255, 255, 255, 0.90);
   --border: rgba(15, 23, 42, 0.10);
@@ -27,12 +28,10 @@
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.10);
   --ok: #16a34a;
-  --ok-soft: rgba(22, 163, 74, 0.12);
   /* 分层阴影与圆角 */
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
   --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
   --shadow-lg: 0 18px 44px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.08);
-  --shadow: var(--shadow-md);
   --ring: 0 0 0 3px rgba(59, 130, 246, 0.32);
   --radius: 14px;
   --radius-sm: 10px;
@@ -48,6 +47,7 @@
     --text: #e8eaf0;
     --muted: #98a1b3;
     --panel: #161923;
+    --panel-2: #101320;
     --glass: rgba(20, 23, 33, 0.72);
     --glass-strong: rgba(20, 23, 33, 0.90);
     --border: rgba(255, 255, 255, 0.10);
@@ -59,7 +59,6 @@
     --danger: #f87171;
     --danger-soft: rgba(248, 113, 113, 0.14);
     --ok: #4ade80;
-    --ok-soft: rgba(74, 222, 128, 0.14);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
     --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.6);
@@ -74,10 +73,9 @@ html, body { margin: 0; padding: 0; }
 /* 底色放在 html 上、body 保持透明：这样 body::before 的光晕（z-index:-1）
    才会落在画布底色之上，而不是被 body 自己的背景盖住 */
 html { background: var(--bg); }
-/* 藏掉页面滚动条：滚轮、触控板、空格键照常滚，只是不再画右侧那条槽。
-   矮视口里骨架总归会顶出一点滚动范围，画出来就是一条滚不出任何内容的滚动条。
-   注意 ::-webkit-scrollbar 一旦接管就不再占宽度：网格会多出这 15px，
-   骨架按 clientWidth 现算，会自己跟上。 */
+/* 藏掉页面滚动条：滚轮、触控板、空格键照常滚，只是不再画右侧那条槽 —— 刻意的外观选择。
+   注意 ::-webkit-scrollbar 一旦接管就不再占宽度：网格因此比有槽时宽 15px，
+   而骨架层的位置和列数都是从网格现量的，会自己跟上。 */
 html { scrollbar-width: none; }
 html::-webkit-scrollbar { display: none; }
 body {
@@ -130,11 +128,11 @@ body::before {
 }
 
 .logo .ic { width: 22px; height: 22px; color: #fff; }
-/* 标题分两段：名字里的 AI 吃渐变（和 logo 的浅色层呼应），其余走文字色，中文退成副题灰 */
-h1 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em;
-    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-
- }
+/* 站名吃品牌渐变，中文那半截退成副题灰（它自己带 color，不受渐变影响） */
+h1 {
+  margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em;
+  background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .brand p { margin: 0; font-size: 12px; color: var(--muted); }
 .appbar-spacer { flex: 1; }
@@ -369,9 +367,9 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 body.marqueeing { user-select: none; -webkit-user-select: none; }
 body.marqueeing .grid figure { cursor: default; transform: none; }
 /* 敏感内容遮罩：R15/R18 默认糊住，点一下才显示（地址加 ?reveal=1 可整体放开）。
-   被遮住的卡片**不会请求图片** —— 点到才下载，不是「先下下来再糊上」。 */
-/* 糊得很重，但底下的缩略图是真实下载的 —— 只让你看出大致轮廓，看不清内容 */
-.grid figure.is-covered { cursor: pointer; background: var(--panel-2, #222); }
+   遮罩底下的图**只下载缩略图**（512px）：糊得重到只能看出大致轮廓，点开才去取原图，
+   所以不存在「先把原图下下来再糊上」——悬停预取也特意跳过了被遮罩的卡片。 */
+.grid figure.is-covered { cursor: pointer; background: var(--panel-2); }
 .grid figure.is-covered img { filter: blur(38px); transform: scale(1.2); }
 .grid figure .cover-hint {
   position: absolute; inset: 0; z-index: 3;
@@ -420,16 +418,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .dialog-box h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
 .dialog-box h2 .ic { width: 18px; height: 18px; color: var(--accent); }
 .dialog-box p { margin: 0 0 14px; color: var(--muted); word-break: break-all; }
-.dup-preview { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
-.dup-side { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
-.dup-side img { width: 110px; height: 110px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--border); }
-.dup-arrow { display: flex; color: var(--muted); }
-.dup-arrow .ic { width: 18px; height: 18px; }
-.dup-compare { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 600; }
-.dup-compare .ic { width: 14px; height: 14px; stroke-width: 2.2; }
-.dup-compare.same { color: var(--ok); }
-.dup-compare.diff { color: var(--danger); }
-.dup-apply { margin: 0 0 12px; }
 .field { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
 .field .req { color: var(--danger); }
 .field input, .field select {
@@ -572,7 +560,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .btn .spin { width: 13px; height: 13px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 骨架卡片：刻意用 div 而非 figure —— 多选/框选/公开徽标都会扫 #galleryGrid figure */
+/* 骨架层：贴住网格位置的一个固定层，铺过头的格子由 overflow:hidden 裁掉。
+   它不在文档流里，所以永远撑不出页面滚动条 —— 「铺满一屏」和「不许冒滚动条」
+   这两件事因此不再打架（旧实现把骨架铺进网格，于是得反过来实测 scrollHeight 撤格子）。
+   列宽/行距沿用 .grid 那一套，JS 只负责把层贴到网格的盒子上。
+   align-content:start 不能省：网格默认会把隐式行拉伸去填满容器高度，那样一格抻成一屏高，
+   看着就只剩一行骨架了。 */
+.sk-layer { position: fixed; overflow: hidden; pointer-events: none; z-index: 1; align-content: start; }
 .sk-tile { border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border); overflow: hidden; }
 .sk-tile .sk-img { aspect-ratio: 1; }
 .sk-tile .sk-cap { height: 10px; margin: 10px 9px; border-radius: 5px; }
@@ -658,7 +652,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <div class="brand no-select">
       <span class="logo"><svg class="ic ic-solid"><use href="#i-logo"/></svg></span>
       <div>
-        <h1>OhtoAi</span> <span class="zh">图床</span></h1>
+        <h1>OhtoAi <span class="zh">图床</span></h1>
         <p id="bucketInfo"></p>
       </div>
     </div>
@@ -684,7 +678,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     <button id="newAlbumBtn" class="btn"><svg class="ic"><use href="#i-folder-plus"/></svg><span class="lbl">新建相册</span></button>
     <button id="selectModeBtn" class="btn"><svg class="ic"><use href="#i-check-square"/></svg><span class="lbl">多选</span></button>
     <button id="refreshGallery" class="btn"><svg class="ic"><use href="#i-refresh"/></svg><span class="lbl">刷新</span></button>
-    <button id="backfillThumbs" class="btn" title="给还没有缩略图的图片（比如从 COS 迁移过来的旧图）批量补上缩略图"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">补缩略图</span></button>
+    <button id="backfillThumbs" class="btn" title="给还没有缩略图的图片批量补上缩略图"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">补缩略图</span></button>
     <!-- 设置按钮放在这排的最后：它以前在顶栏，而且是 admin-only，
          一切换视图就整组右移，前面的标签跟着动。挪到这里就不影响顶栏布局了。 -->
     <button id="settingsBtn" class="btn ghost">
@@ -724,6 +718,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   </div>
 
   <div id="galleryGrid" class="grid"></div>
+  <!-- 骨架层：固定定位盖在网格上，见「加载指示」一节 -->
+  <div id="gallerySkeleton" class="grid sk-layer" aria-hidden="true" hidden></div>
   <div class="gallery-more"><button id="loadMore" class="btn" hidden><span class="spin" hidden></span><span class="lbl">加载更多</span></button></div>
 
   <div id="dropOverlay" hidden>
@@ -745,8 +741,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   </div>
   <div style="display:flex;align-items:center;gap:8px;padding:0 12px 8px;font-size:12px;color:var(--muted);">
     <label style="display:flex;align-items:center;gap:6px;">上传分级
-      <!-- 默认 unspecified = 旧版的「未公开」：不进任何相册，要手动设过分级才会出现在相册里 -->
-      <select id="uploadRating" style="padding:3px 6px;border-radius:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);">
+      <!-- 默认 unspecified = 不进任何相册，要手动设过分级才会出现在相册里 -->
+      <select id="uploadRating" style="padding:3px 6px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);">
         <option value="unspecified">未分类（不进相册）</option>
         <option value="G">G</option>
         <option value="R12">R12</option>
@@ -863,7 +859,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 <div id="marquee" hidden></div>
 
 <script src="config.js"></script>
-<!-- 这里原本加载 cos-js-sdk-v5（浏览器直传 COS）。已迁移到 Cloudflare R2 + D1 后端，不再需要。 -->
 <script>
 (function () {
   'use strict';
@@ -878,19 +873,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   let cfg = Object.assign({}, DEFAULTS, window.PICBED_CONFIG || {});
   const STORE_KEY = 'picbed_settings';
   try {
-    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-    // 缩略图已改为整站统一（只由 config.js 的 thumb 决定），本机不再保留这个开关。
-    // 旧版本存过 thumb:false 的话，留着会永远盖住 config.js —— 而工具栏的勾选框已经去掉，
-    // 用户再也找不到地方改回来 —— 所以直接丢掉这个键
-    delete saved.thumb;
-    // 旧版存的是 worker / customDomain（指向腾讯云 COS 那套）。它们会**盖住 config.js**，
-    // 留着的话新页面会一直去连旧 Worker —— 那份配置已经无效了，直接丢掉。
-    delete saved.worker;
-    delete saved.customDomain;
-    delete saved.bucket;
-    delete saved.region;
-    cfg = Object.assign(cfg, saved);
-  } catch (e) {}
+    // 本机只存 api / password / format（见 saveSettings）。老版本可能还存着 thumb、worker、
+    // customDomain 之类的键 —— 那些字段现在没人读，合并进来也无害，不必专门删。
+    cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(STORE_KEY) || '{}'));
+  } catch (e) { /* 存的不是合法 JSON：当没有 */ }
 
   function saveSettings() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
@@ -905,10 +891,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   const FMT_LABEL = { url: 'URL', markdown: 'MD', html: 'HTML' };
   const FMT_ICON = { url: 'link', markdown: 'md', html: 'code' };
   const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico'];
-  const TYPE_BY_EXT = {
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-    webp: 'image/webp', svg: 'image/svg+xml', avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon',
-  };
 
   function toast(msg, isError) {
     const el = $('toast');
@@ -943,8 +925,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   // ---------- 加载指示：顶部进度条 + 网格骨架 ----------
-  // 进度条走引用计数而不是 show/hide 配对：管理视图的 loadGallery 与 loadPublicMarkers
-  // 是并发的，谁先返回谁先结束，配对的写法会让进度条在另一个还在请求时就消失。
+  // 进度条走引用计数而不是 show/hide 配对：一次操作可能并发好几个请求
+  // （比如上传在跑、同时还在拉列表），谁先返回谁先结束，
+  // 配对的写法会让进度条在另一个还在请求时就消失。
   let busyCount = 0;
   let barShowTimer = 0;
   let barHideTimer = 0;
@@ -979,48 +962,14 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // 加载态分两处表达：
   //   · 转圈 + 文案走 .gallery-meta 那一行（网格上方，高度写死，切换时不推动网格）
-  //   · 骨架格子铺进网格，只在 reset 加载时铺
-  // 骨架必须是 <div> 而不是 <figure>：refreshPublicIndicators / 多选 / 框选都会扫
-  // #galleryGrid figure，混进 figure 会被当成真实图片。
-  // 网格几何：骨架数量和缩略图尺寸都按它算，必须与 .grid 的样式保持一致
-  const GRID_GAP = 12;       // .grid 的 gap
-  const GRID_TILE_MIN = 150; // .grid 的 minmax(150px, 1fr)
-
-  // 当前布局下网格的列数
-  function gridCols() {
-    const w = $('galleryGrid').clientWidth;
-    if (!w) return 0; // 布局未就绪或元素不可见
-    return Math.max(1, Math.floor((w + GRID_GAP) / (GRID_TILE_MIN + GRID_GAP)));
-  }
-
-  // 当前布局下每个格子的实际宽度（CSS 像素）
-  function gridTileSize() {
-    const cols = gridCols();
-    if (!cols) return 0;
-    const w = $('galleryGrid').clientWidth;
-    return (w - (cols - 1) * GRID_GAP) / cols;
-  }
-
-  // 骨架要铺满一屏，又必须自己不撑出滚动条 —— 而这个「一屏」只能量、不能算：
-  // 格子宽度是分数像素、卡片带边框、网格下方还压着 .gallery-more 的间距与 .wrap 的 64px 底衬，
-  // 估算只要多算几像素，「视口刚好容纳整数层」时骨架就顶出一条滚动条来。
-  // 所以铺的时候按估算来（一次到位，够快），末尾按实测撤整层（够准）。
-  const SK_CHROME_H = 32;  // 卡片标题条(.sk-cap 10px + 上下 margin 20px) + 上下边框 2px；只喂估算，量偏了有实测兜底
-  const SK_MAX = 60;       // 上限，防止超长屏上铺出几百个节点
-  const SK_ROWS_MIN = 1;   // 层数下限：矮视口里宁可少铺一层也不冒滚动条；连一层都放不下才认输
-  const SK_COUNT_FALLBACK = 12; // 量不到宽度时的保守数量
+  //   · 骨架走 #gallerySkeleton —— 一个贴住网格位置的固定层，只在 reset 加载时铺
+  // 骨架刻意**不**铺进 #galleryGrid：铺进去它就参与文档高度，估多几像素就是一条滚动条，
+  // 于是只能反过来量 scrollHeight 一层层往回撤（上一版的写法，为此还顺手把页面滚动条藏了）。
+  // 挪出文档流之后，「铺满一屏」和「不许冒滚动条」不再打架，多铺的格子被 overflow:hidden 裁掉即可。
+  const SK_MAX = 60;            // 上限：超长屏上不必铺出几百个节点
+  const SK_COUNT_FALLBACK = 12; // 量不到网格宽度时的保守数量（视图还没就绪）
   let gridLoaderSeq = 0;
   let gridLoaderOwner = 0;
-
-  // 估算层数：只按「填满视口」算，不算网格下方的内容 —— 宁可多铺一层，
-  // 多出来的那层会被 trimSkeleton 撤掉；估少了才吃亏，屏幕底部会空一块。
-  function skeletonRows() {
-    const tileW = gridTileSize();
-    if (!tileW) return SK_ROWS_MIN;
-    const availH = window.innerHeight - $('galleryGrid').getBoundingClientRect().top;
-    const rowH = tileW + SK_CHROME_H + GRID_GAP; // 图片区是正方形，宽即高
-    return Math.max(SK_ROWS_MIN, Math.floor((availH + GRID_GAP) / rowH));
-  }
 
   function skeletonTile() {
     const tile = document.createElement('div');
@@ -1033,38 +982,45 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return tile;
   }
 
-  // 实测收尾：整层整层往下撤，直到页面不再出现纵向滚动条。
-  // 判据直接用 scrollHeight/clientHeight，而不是「网格底边 + 手写的预留量」：
-  // 网格下方还有什么（加载更多、.wrap 底衬、以后的页脚）由 DOM 说了算，滚动条本来就是这么冒出来的。
-  function trimSkeleton(grid, cols) {
-    const doc = document.documentElement;
-    let tiles = grid.querySelectorAll('.sk-tile');
-    // 循环体一次撤一整层：读一次 scrollHeight 就要强制一次布局，逐格试探不如整层跳
-    while (tiles.length > cols * SK_ROWS_MIN && doc.scrollHeight > doc.clientHeight) {
-      const keep = tiles.length - cols;
-      for (let i = tiles.length - 1; i >= keep; i--) tiles[i].remove();
-      tiles = grid.querySelectorAll('.sk-tile');
-    }
-  }
-
+  // 把骨架层贴到网格当前的盒子上再铺满它。
+  // 列数、行高、行距全都从 CSS 现读（层与网格共用 .grid 的 grid-template-columns / gap），
+  // 所以改样式不必回来同步 JS 常量 —— 整段只读一次布局，没有来回试探的循环。
   function fillSkeleton() {
     const grid = $('galleryGrid');
-    const cols = gridCols();
-    if (!cols) { // 量不到宽度（视图还没就绪）：铺个保守数量就收手，不做实测
-      for (let i = 0; i < SK_COUNT_FALLBACK; i++) grid.appendChild(skeletonTile());
+    const layer = $('gallerySkeleton');
+    layer.hidden = false;
+    layer.textContent = '';
+    const r = grid.getBoundingClientRect();
+    if (!r.width) { // 量不到网格宽度（视图还没就绪）：铺个保守数量，不做定位
+      for (let i = 0; i < SK_COUNT_FALLBACK; i++) layer.appendChild(skeletonTile());
       return;
     }
-    const n = Math.min(SK_MAX, cols * skeletonRows());
-    for (let i = 0; i < n; i++) grid.appendChild(skeletonTile());
-    trimSkeleton(grid, cols);
+    const top = Math.max(0, r.top); // 页面可能还停在滚动位置上，别把层顶出视口
+    layer.style.top = top + 'px';
+    layer.style.left = r.left + 'px';
+    layer.style.width = r.width + 'px';
+    layer.style.bottom = '0'; // 层高 = 视口余下的部分，交给这两条边夹出来
+    // 先铺一格样板，量出卡片真实的高度（图片区 + 标题条 + 边框），再算需要几层
+    const sample = skeletonTile();
+    layer.appendChild(sample);
+    const cs = getComputedStyle(layer);
+    const gap = parseFloat(cs.rowGap) || 0;
+    const cols = cs.gridTemplateColumns === 'none' ? 1 : cs.gridTemplateColumns.split(' ').length;
+    const rows = Math.max(1, Math.ceil((layer.clientHeight + gap) / (sample.offsetHeight + gap)));
+    const n = Math.min(SK_MAX, rows * cols);
+    for (let i = 1; i < n; i++) layer.appendChild(skeletonTile());
   }
 
-  // 缩略图不再是「原图 + 查询参数」——那套依赖 COS 数据万象的服务端处理，R2 没有这个能力。
-  // 现在缩略图是上传时在浏览器里用 canvas 生成的独立对象，键存在数据库的 thumb_key 列，
-  // 接口直接把 thumb_url 返回给前端（见 renderGridItem）。
-  //
-  // 尺寸在生成时就定死了（THUMB_SIZE = 512 的正方形），所以旧版那套
-  // 「按格子宽度 × DPR 动态算边长」的机制一并删掉了 —— 预先烘焙的图没法按视口变尺寸。
+  // 窗口尺寸变了：网格的宽度、列数都跟着变，骨架还铺着的话得重新量一遍
+  // （真实卡片靠 CSS 自己重排，骨架层的位置是量出来的，它自己跟不上）
+  window.addEventListener('resize', () => {
+    if (!$('gallerySkeleton').hidden) fillSkeleton();
+  });
+
+  // 缩略图是**独立的对象**（上传时在浏览器里用 canvas 生成），键存在数据库的 thumb_key 列，
+  // 接口把 thumb_url 直接返回给前端（见 renderGridItem）。
+  // 它跟原图一样是预先烘焙好的成品，尺寸在生成时就定死了（THUMB_SIZE = 512 的正方形），
+  // 没法按视口变尺寸 —— 所以也没有「按格子宽度 × DPR 现算边长」这回事。
   //
   // 已知取舍：canvas 生成的是基线 WebP，不是渐进式，所以**缩略图卡片没有增量显形**
   // （那是服务端编码能力）。进度条照常；原图的显形取决于原文件本身是不是渐进式。
@@ -1077,9 +1033,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     $('galleryBusyText').textContent = o.text || '加载中…';
     $('galleryBusy').hidden = false;
     $('galleryCount').hidden = true;
-    const grid = $('galleryGrid');
     // 已经有骨架在屏幕上（上一次 reset 还没收尾）：沿用即可，不重复铺
-    if (o.skeleton && !grid.querySelector('.sk-tile')) fillSkeleton(); // 只追加，永不清空网格
+    if (o.skeleton && $('gallerySkeleton').hidden) fillSkeleton();
     return seq;
   }
 
@@ -1089,8 +1044,11 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (!seq || seq !== gridLoaderOwner) return;
     $('galleryBusy').hidden = true;
     $('galleryCount').hidden = false;
-    // 最新的 owner 收尾时顺手清干净所有骨架块（含它继承来的上一轮残留）
-    $('galleryGrid').querySelectorAll('.sk-tile').forEach((el) => el.remove());
+    // 最新的 owner 收尾时把骨架层整个收掉（含它继承来的上一轮残留）
+    const layer = $('gallerySkeleton');
+    layer.hidden = true;
+    layer.textContent = '';
+    layer.removeAttribute('style'); // 位置/宽高是上一轮量的，留着会误导下一轮
   }
 
   async function copyText(text) {
@@ -1148,11 +1106,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return { url, markdown: `![${alt}](${url})`, html: `<img src="${url}" alt="${alt}" />` };
   }
 
-  const TYPE_EXT_MAP = {
-    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
-    'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
-  };
-
   // ---------- 相册名 ----------
   // 相册现在是数据库里的一列，不再是键路径。这一套函数负责它的净化与拼接，
   // 规则与 Worker 的 safeAlbum 保持一致（本地先挡一道，省得白跑一趟网络）。
@@ -1207,7 +1160,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   const queue = [];
   let processing = false;
 
-  // targetAlbum 不传就传进当前所在的相册（与旧版的「上传到当前目录」一致）
+  // targetAlbum 不传就传进当前所在的相册
   function addFiles(files, targetAlbum) {
     if (!needWorker()) return;
     const base = targetAlbum === undefined || targetAlbum === null ? galleryAlbum : targetAlbum;
@@ -1338,7 +1291,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   }
 
-  /** 上传时用的分级。默认 unspecified = 旧版的「未公开」：要手动设过分级才进相册 */
+  /** 上传时用的分级。默认 unspecified = 不进任何相册：要手动设过分级才出现在相册里 */
   function currentUploadRating() {
     const el = $('uploadRating');
     return (el && el.value) || 'unspecified';
@@ -1656,11 +1609,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // ---------- 相册 ----------
   let galleryLoaded = 0;
-  let galleryPage = 1;   // 新接口用页码分页（旧版是 marker 游标）
+  let galleryPage = 1;   // 页码分页（接口按 page/pageSize 取）
   let galleryTotal = 0;
   let galleryMaxPage = 1;
   let galleryAlbum = ''; // 当前相册名（'' = 根）。相册是数据库里的一列，不再是键前缀
-  let galleryFolders = []; // 当前层级的子相册，随第一页一起返回
   // 相册内容的世代号：每次发起加载都 ++（管理视图与公开画廊共用同一个 #galleryGrid，
   // 所以也共用一个世代号）。await 返回后只有「最新一次」请求有权往网格里写内容与分页
   // 状态 —— 否则「打开子相册，还没加载完就退回父目录」时，子相册的响应会晚于父目录
@@ -1679,7 +1631,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   let publicPage = 1;
   let publicTotal = 0;
   let publicMaxPage = 1;
-  let publicFolders = [];
   // 分级档位来自 URL 的 ?rating= 参数（r15 = G+R12+R15 / r15_only = 仅 R15），
   // 是个「安静」的开关，页面上不放控件；空串表示用服务端的默认档。
   const publicRatingParam = () => new URLSearchParams(location.search).get('rating') || '';
@@ -1711,8 +1662,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   // ---------- 图片数据缓存 ----------
   // 网格里每一项都缓存**整行数据**（id / url / thumb_url / rating / is_hidden / album），
-  // 按 r2_key 索引。旧版只存键，所以「是否公开」得靠另一套零字节标记对象去查；
-  // 现在状态就在行里，不用再单独维护一份。
+  // 按 r2_key 索引。rating / is_hidden 这些状态就在行里，不用再单独拉一份。
   const itemsByKey = new Map();
   function remember(row) {
     itemsByKey.set(row.key, row);
@@ -1722,11 +1672,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   /** 对访客是否可见：没被隐藏，且分过级（unspecified 不进任何相册）—— 两个维度是独立的 */
   function isPublished(row) {
     return !!row && !row.is_hidden && row.rating !== 'unspecified';
-  }
-
-  /** 把一批键换成 id（批量接口按 id 操作） */
-  function idsOf(keys) {
-    return [...keys].map((k) => itemsByKey.get(k)).filter(Boolean).map((r) => r.id);
   }
 
   // 批量改动。后端单次上限 500 条，前端按 500 分块（「跨页全选」很容易超）
@@ -1755,17 +1700,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     return data && data.image;
   }
 
-  // 内容一致性检查：先比大小，大小相同则下载远端逐字节比对
-  // 旧版的重名冲突流程（compareFiles / askDialog / autoRenameKey / resolveCollisions）整体删除：
-  // 服务端现在每次上传都生成随机且不可变的键，**键永远不会冲突**；
-  // 需要提示「同相册已有同名文件」时按 filename 查一次列表即可（见 findDuplicate）。
-
-  /** 查同相册里是否已有同名文件（上传前提示用，不阻塞上传） */
-  async function findDuplicate(album, filename) {
-    const qs = new URLSearchParams({ album: album || '', q: filename, pageSize: '10' });
-    const data = await api('/api/images?' + qs.toString());
-    return (data.images || []).find((r) => r.filename === filename) || null;
-  }
+  // 这里原本还有一套「重名冲突」流程（比对内容、覆盖/自动改名/跳过）。
+  // 现在服务端每次上传都生成随机且不可变的键，**键永远不会冲突**，那套流程整体删掉了：
+  // 同一个相册里可以存在两个同名文件，互不影响。
 
   // ---------- 相册工具 ----------
   // 相册不再是键前缀，就是一个以 / 分隔的名字。下面这些函数负责它的解析与校验。
@@ -1869,9 +1806,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 
   function invalidateAlbumTree() { albumTreePaths = null; }
 
-  // 从 /list 全量结果推导相册路径：标记对象（尾 /）直接成路径，
-  // 普通对象则补上其所有祖先目录（覆盖文件夹上传产生的隐式目录）
-  /** 把相册名展开成含所有祖先层级的路径数组（'a/b' 会同时产出 'a' 和 'a/b'） */
+  /** 把相册名展开成含所有祖先层级的路径数组（'a/b' 会同时产出 'a' 和 'a/b'）
+   *  接口给的是「有图的那些相册」，中间的层级要靠这一步补齐 ——
+   *  比如只传过 旅行/2024 的图，「旅行」这一层也要能出现在树里。 */
   function buildAlbumPaths(albums) {
     const set = new Set();
     for (const a of albums) {
@@ -2009,7 +1946,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     setLabel(btn, loading ? '加载中…' : '加载更多');
   }
 
-  // 每页张数：接口硬上限是 200（旧配置里的 maxKeys=500 会直接被夹到 200）
+  // 每页张数：接口的 pageSize 硬上限是 200（传大了会被夹到 200）
   const PAGE_SIZE = 100;
 
   async function loadGallery(reset) {
@@ -2019,7 +1956,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (reset) {
       galleryPage = 1;
       galleryLoaded = 0;
-      galleryFolders = [];
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 和在途下载成对：卡片都没了，就别再往下下（blob 也在这里一起回收）
       clearSelection();
@@ -2041,7 +1977,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       if (reset) {
-        // 子相册由接口随第一页一起给（旧版靠 COS 的 CommonPrefixes，翻页时不追加）
+        // 子相册由接口随第一页一起给，翻页时不追加
         for (const f of data.folders || []) $('galleryGrid').appendChild(renderFolderTile(f.album, f.n));
       }
       const items = data.images || [];
@@ -2050,7 +1986,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         $('galleryGrid').appendChild(renderGridItem(row, ''));
       }
       galleryTotal = data.total || 0;
-      galleryFolders = data.folders || [];
       galleryMaxPage = Math.max(1, Math.ceil(galleryTotal / PAGE_SIZE));
       galleryLoaded += items.length;
       $('galleryCount').textContent = galleryTotal > 0
@@ -2086,7 +2021,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (reset) {
       publicPage = 1;
       publicLoaded = 0;
-      publicFolders = [];
       $('galleryGrid').textContent = '';
       dlCancelAll(); // 同上：网格清了，在途的缩略图请求与 blob 一起收掉
     } else {
@@ -2125,7 +2059,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         $('galleryGrid').appendChild(renderGridItem(row, 'public'));
       }
       publicTotal = data.total || 0;
-      publicFolders = data.folders || [];
       publicMaxPage = Math.max(1, Math.ceil(publicTotal / PAGE_SIZE));
       publicLoaded += files.length;
       $('galleryCount').textContent = publicTotal > 0
@@ -2176,9 +2109,8 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   // ---------- 分级 / 隐藏（管理视图） ----------
-  // 旧版的「公开状态」是一套零字节标记对象，要单独拉一份缓存（loadPublicMarkers）；
-  // 现在状态就在图片行里，改完直接更新本地行 + 重画徽标，不用再单独同步。
-  const RATING_LABEL = { G: 'G', R12: 'R12', R15: 'R15', R18: 'R18', unspecified: '未分类' };
+  // 状态（rating / is_hidden）就在每张图的列表行里，改完直接更新本地行 + 重画徽标，
+  // 不用再单独拉一份「谁公开了」的缓存。
 
   /** 重画网格里每张卡片的分级徽标与隐藏态 */
   function refreshPublicIndicators() {
@@ -2193,7 +2125,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         badge.className = 'pub-badge r-' + row.rating; // 改档位时颜色也要跟着变
         badge.hidden = !isPublished(row); // 能进相册才显示
       }
-      fig.classList.toggle('is-hidden', !!row.is_hidden);
       const btn = fig.querySelector('.pub-toggle');
       if (btn) {
         setIcon(btn, row.is_hidden ? 'moon' : 'globe');
@@ -2258,7 +2189,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     }
   }
 
-  /** 改单张图的分级。unspecified = 不进任何相册（旧版「未公开」的等价物） */
+  /** 改单张图的分级。unspecified = 不进任何相册 */
   async function setRating(key, rating) {
     const row = itemsByKey.get(key);
     if (!row) return;
@@ -2843,8 +2774,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   // ---------- 缩略图下载与进度 ----------
   // 为什么自己下载：原生 <img> 的字节进度没有任何接口可观测，要真实百分比就只能自己 fetch。
   // 代价是浏览器原本白送的东西得自己补：懒加载、并发上限，以及「加载多少显示多少」——
-  // 后者靠把已收字节反复包成 blob 换 src：mogr2 的 interlace/1 让 JPEG 变渐进式，
-  // 实测截断到 12% 字节就能渲染出整张模糊图并随字节变锐，而且截断的数据派发的是 load 不是 error。
+  // 后者靠把已收字节反复包成 blob 换 src：截断的 JPEG / PNG 也能把已经到手的那部分画出来，
+  // 于是能看到「先糊后清」的过程，而且截断的数据派发的是 load 不是 error。
+  // 哪些格式吃这一套，见下面的 revealable —— 单帧 WebP 截断后什么都不画，就不该换 src。
   // 这条路任何一环走不通（老浏览器、CORS 没了）就整会话退回原生加载，卡片行为与改造前一致。
   const DL_CONCURRENCY = 6;        // 在途上限：不设的话一次 reset 会同时开几百个请求（原生懒加载本来是浏览器在管）
   const DL_AHEAD = '800px 0px';    // 提前约一屏开始下，滚起来不至于看到一片空卡
@@ -3045,7 +2977,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       job.total = Number(res.headers.get('content-length')) || 0;
       // 增量显形只对「截断也能出画面」的格式有意义：实测 JPEG（渐进/基线）与 PNG 都会把已收到的那部分
       // 画出来，而单帧 WebP 在截断状态下什么都不画 —— 那时换 src 会把骨架摘掉、露出一张空卡，比不换更糟。
-      // 缩略图里的 PNG 现在就被转成了 WebP（见 thumbUrl），未来 CDN 若自动转码也会走到这里。
+      // 缩略图里的 PNG 上传时就转成了 WebP，所以卡片这条路通常轮不到显形；原图回退那条才用得上。
       const revealable = /^image\/(jpeg|png)/i.test(mime);
       const maxReveals = !revealable ? 0 : (job.total > DL_STREAM_CAP ? 0 : (job.total > DL_REVEAL_BIG ? 3 : DL_REVEAL_MAX));
       const reader = res.body.getReader();
@@ -3138,9 +3070,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     if (dlIO) dlIO.disconnect();
   }
 
-  // thumbN：缩略图边长，0 表示取原图。由调用方算一次传进来 ——
-  // renderGridItem 是在循环里逐张 append 的，若在这里现算会反复触发同步布局
-  /** 揭开敏感内容遮罩：移掉覆盖层，**这之后才开始下载**这张图 */
+  /** 揭开敏感内容遮罩：移掉覆盖层，**这之后才去取原图**（此前只下过缩略图） */
   function revealCover(fig, row) {
     fig.classList.remove('is-covered');
     const hint = fig.querySelector('.cover-hint');
@@ -3222,9 +3152,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
         bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
       });
     }
-    // 悬停意图：停够一会儿就预取原图，点开大图时正好命中缓存（见 pfHover）
-    fig.addEventListener('mouseenter', () => pfHover(it.key));
-    fig.addEventListener('mouseleave', pfCancel);
+    // 悬停意图：停够一会儿就预取原图，点开大图时正好命中缓存（见 pfHover）。
+    // 被遮罩的卡片不预取：遮罩的规矩是「点一下才算同意查看」，而预取拉的是**原图** ——
+    // 鼠标顺路扫过就把敏感原图落进缓存，等于绕过遮罩（详见 renderGridItem 里 covered 那支）。
+    if (!covered) {
+      fig.addEventListener('mouseenter', () => pfHover(it.key));
+      fig.addEventListener('mouseleave', pfCancel);
+    }
     if (img.complete && img.naturalWidth) fig.classList.remove('ph'); // 兜底：内存缓存命中时不再派发 load
     // 显示原始文件名：新键是时间戳+随机（不含文件名），名字保存在数据库里
     const name = it.filename || it.key.split('/').pop();
@@ -3402,7 +3336,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
     btn.disabled = true;
     setLabel(btn, '转存中…');
     try {
-      // 由 Worker 抓取远程图片并存进 R2（10MB 上限、15 秒超时）
+      // 由 Worker 抓取远程图片并存进 R2（大小上限同上传、15 秒超时）
       const data = await apiSend('/api/transfer', 'POST', { url, rating: currentUploadRating() });
       input.value = '';
       const image = data.image;
@@ -3422,8 +3356,9 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   }
 
   // ---------- 批量补缩略图 ----------
-  // 从 COS 迁移过来的旧图没有缩略图（旧方案靠服务端图片处理，R2 没有这个能力）。
-  // 这个工具在浏览器里逐张跑：拉原图 → canvas 生成 → 上传。免费、可中断、下次接着补
+  // 没有缩略图的图（迁移过来的旧图、SVG/ICO 这类跳过处理的、生成失败的）一直是原图直出，
+  // 在相册里就是又慢又费流量。这个工具在浏览器里逐张跑：拉原图 → canvas 生成 → 上传。
+  // 免费、可中断、下次接着补
   // （补好的会自动从「还没有缩略图」的查询里消失）。
   let backfilling = false;
 
@@ -3596,8 +3531,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   $('urlInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') transferUrl(); });
   $('copyAllBtn').onclick = copyAllResults;
   $('settingsBtn').onclick = () => openSettings();
-  // 旧版这里是「诊断 COS 密钥权限」。现在后端只有一套 REST 接口，
-  // 所以改成直接打一次列表接口：既验证地址可达，也验证密码对不对。
+  // 直接打一次列表接口：既验证地址可达，也验证密码对不对。
   $('probeBtn').onclick = async () => {
     const out = $('probeResult');
     out.textContent = '测试中…';
@@ -3673,7 +3607,6 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
       if (!$('promptDialog').hidden) { $('promptCancel').click(); return; }
       if (!$('confirmDialog').hidden) { $('confirmCancel').click(); return; }
       if (!$('settingsDialog').hidden) { closeSettings(); return; }
-      if (!$('dupDialog').hidden) { $('dupSkip').click(); return; }
       if (!$('lightbox').hidden) { closeLightbox(); return; }
       if (!$('uploadPanel').hidden) { closePanel(); }
       return;

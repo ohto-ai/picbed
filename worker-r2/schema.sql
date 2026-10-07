@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS images (
                                               -- 相册可以随时改，两者刻意解耦（移动/改名不产生新的直链）
   thumb_key   TEXT,                           -- 缩略图在 R2 里的键；NULL = 没有缩略图，前端退回原图
   uploaded_at TEXT    NOT NULL,               -- ISO8601 UTC，如 2026-10-03T12:00:00Z
-  updated_at  TEXT                            -- 最后一次改 is_hidden / rating / album 的时间
+  updated_at  TEXT                            -- 最后一次改 is_hidden / rating / album / filename / thumb_key 的时间
 );
 
 -- 相册接口的热路径：

@@ -2,7 +2,8 @@
  * D1 读写封装 —— 所有 SQL 都集中在这里，接口层不直接写 SQL。
  *
  * 约定：
- *   * 字段白名单：只允许改 is_hidden / rating，字段名不来自用户输入，不拼字符串。
+ *   * 字段白名单：只允许改 is_hidden / rating / album / filename（见 updateImages），
+ *     字段名不来自用户输入，不拼字符串。
  *   * 值一律用 bind() 参数化。
  *   * D1 单条语句最多 100 个绑定参数，所以 id 列表按 90 一组分块（见 CHUNK）。
  *   * uploaded_at / updated_at 统一存 ISO8601 UTC 文本，排序和 JS 解析都省事。
@@ -255,8 +256,8 @@ export async function listPublicAlbumCounts(env, album, allowed) {
   const params = [...listable.params];
 
   if (album) {
-    where.push(`(album = ? OR substr(album, 1, length(?) + 1) = ? || '/')`);
-    params.push(album, album, album); // 三条 ? 各自绑定，不复用编号
+    where.push(SUBTREE);
+    params.push(album, album, album); // 三条 ? 各自绑定，不复用编号（见 SUBTREE 上的说明）
   }
   const res = await env.DB.prepare(
     `SELECT album, COUNT(*) AS n FROM images WHERE ${where.join(' AND ')} GROUP BY album`

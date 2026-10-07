@@ -1,15 +1,19 @@
 /**
  * Worker 入口与路由。
  *
- * 这个 Worker 负责：
- *   /admin               管理页（HTML 由 Text 模块打进 Worker，不需要额外部署静态站）
- *   /api/upload          上传（密码）
- *   /api/images          管理列表（密码）
- *   /api/images/:id      改隐藏 / 改分级 / 删除（密码）
- *   /api/images/bulk     批量（密码）
- *   /api/albums          相册名列表（密码）
- *   /api/public/images   相册列表（公开，带 CORS）
- *   /i/<key>             直接读 R2 —— 本地开发用；生产直链走 R2 自定义域名，不经过这里
+ * 这个 Worker 负责（带密码的都要求 x-picbed-key 头）：
+ *   /admin                  管理页（HTML 由 Text 模块打进 Worker，不需要额外部署静态站）
+ *   /api/upload             上传（POST）
+ *   /api/transfer           抓远程图片转存（POST）
+ *   /api/images             管理列表（GET）
+ *   /api/images/:id         改隐藏 / 改分级 / 改名 / 改相册（PATCH）、删除（DELETE）
+ *   /api/images/:id/thumb   传缩略图（PUT）
+ *   /api/images/bulk        批量改 / 批量删（POST）
+ *   /api/albums             相册名列表（GET）、删整棵子树（DELETE）
+ *   /api/albums/stats       删之前的统计（GET）
+ *   /api/albums/rename      重命名 / 移动整个相册（POST）
+ *   /api/public/images      相册列表（公开，带 CORS）
+ *   /i/<key>                直接读 R2 —— 本地开发用；生产直链走 R2 自定义域名，不经过这里
  *
  * ⚠️ 图片直链不走 Worker：img.ohtoai.top 是 R2 桶的自定义域名。
  *    所以隐藏 / 分级只影响相册列表的陈列，不拦直链（详见 src/access.js）。
@@ -53,7 +57,7 @@ function corsFor(request, env) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Picbed-Key, X-Filename, X-Rating, X-Album',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Picbed-Key, X-Filename',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
@@ -221,10 +225,14 @@ export default {
           endpoints: [
             'GET  /admin',
             'POST /api/upload',
+            'POST /api/transfer',
             'GET  /api/images',
-            'GET  /api/albums',
+            'PUT  /api/images/:id/thumb',
             'PATCH|DELETE /api/images/:id',
             'POST /api/images/bulk',
+            'GET|DELETE /api/albums',
+            'GET  /api/albums/stats',
+            'POST /api/albums/rename',
             'GET  /api/public/images?rating=&album=&page=',
           ],
         });

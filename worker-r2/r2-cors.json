@@ -4,9 +4,7 @@
       "allowed": {
         "origins": [
           "https://picbed.ohtoai.top",
-          "https://ohto-ai.github.io",
-          "http://localhost:8765",
-          "http://127.0.0.1:8765"
+          "https://ohto-ai.github.io"
         ],
         "methods": ["GET", "HEAD"],
         "headers": ["Range", "If-None-Match", "If-Modified-Since"]
