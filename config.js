@@ -10,4 +10,8 @@ window.PICBED_CONFIG = {
 
   // 源码仓库地址：填了会在顶栏给访客显示一个 GitHub 入口，留空则不显示
   repo: 'https://github.com/ohto-ai/picbed',
+
+  // 界面风格（访客可在顶栏「风格」里自行改，改完存在本机，优先于这里）
+  // modern 现代简约 / skeuo 早期智能机拟物 / lcd 功能机LCD点阵 / y2k Y2K霓虹 / pda PDA
+  skin: 'lcd',
 };
