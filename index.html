@@ -1302,6 +1302,8 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
 :root {
   --crt-scan: .22;      /* 扫描线深度 */
   --crt-grille: .045;   /* 荫罩（RGB 细条纹）强度，很淡，只用来让白色不「死白」 */
+  --crt-sweep: .22;     /* 滚动扫描亮带的亮度 */
+  --crt-roll: 6s;       /* 亮带滚一整屏要多久 */
   --crt-vignette: .55;  /* 四角压暗 */
   --crt-edge: .42;      /* 四条边往里压暗的深度，见下面 ::after 的说明 */
 }
@@ -1320,6 +1322,32 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     repeating-linear-gradient(0deg,
       rgba(0, 0, 0, var(--crt-scan)) 0 1px, transparent 1px 3px);
   animation: crt-flicker 5.5s steps(1, end) infinite;
+}
+
+/* 滚动扫描亮带 —— 老显示器帧不同步时那条从下往上爬的亮带。
+   关键是**它得是弯的**：屏是球面，扫过去的亮线在屏上就是一截弧。
+   做法不是画条直带子再加圆角（那样只是两头变尖，整条还是直的），
+   而是拿一个宽正好一屏、横向圆角半径 50%（=50vw）的盒子：
+   横半径和半屏宽相等，拱高就等于纵向圆角半径，弧才真的压进可视区。
+   上下两条边都往中线收，边角又比中间薄 —— 叠上外层的暗角，
+   正好就是管面上那条两头细、中间鼓的亮带。 */
+#crtSweep {
+  /* 比视口宽出 36%：收尖的两个端点要挪到屏外去。
+     正好一屏宽的话，尖点刚好落在左右边缘上，看着像条两头拉尖的梭子。 */
+  position: absolute; left: -18%; right: -18%; top: 0; height: 16vh;
+  border-radius: 50%;
+  background: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, calc(var(--crt-sweep) * .45)) 34%,
+    rgba(255, 255, 255, var(--crt-sweep)) 50%,
+    rgba(255, 255, 255, calc(var(--crt-sweep) * .45)) 66%,
+    rgba(255, 255, 255, 0) 100%);
+  animation: crt-roll var(--crt-roll) linear infinite;
+  will-change: transform;
+}
+@keyframes crt-roll {
+  from { transform: translateY(-20vh); }
+  to   { transform: translateY(120vh); }
 }
 /* 管面：暗角 + 一圈边缘内阴影 + 一块球面反光。
    三者缺一不可 ——
@@ -1345,8 +1373,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .page-progress i { width: 100%; transform: none; animation: none; background: var(--grad); }
-  /* 上面那条已经把动画按停了，这里再显式写一次：闪烁有光敏风险，值得写死 */
-  #crtLayer::before { animation: none; }
+  /* 上面那条已经把动画按停了，这里再显式写一次：闪烁有光敏风险，值得写死。
+     滚动亮带同理 —— 一个一直在动的亮块比静止的更容易让人分心 */
+  #crtLayer::before, #crtSweep { animation: none; }
+  #crtSweep { display: none; }
   .sk-tile .sk-img, .sk-tile .sk-cap, .grid figure.ph::before { background-image: none; background-color: var(--border); }
 }
 </style>
@@ -1608,7 +1638,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 <div id="themeMenu" hidden></div>
 <!-- CRT 滤镜的覆盖层。显隐走 <html data-crt> 而不是 hidden 属性：
      属性能在首帧之前定下来（见 <head> 那段脚本），hidden 得等主脚本跑完才摘，会闪一下 -->
-<div id="crtLayer"></div>
+<div id="crtLayer"><i id="crtSweep"></i></div>
 <div id="marquee" hidden></div>
 
 <script>
