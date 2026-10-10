@@ -10,18 +10,34 @@
 // （LCD 的绿底和「现代」的浅灰差得远，那一闪很显眼）。
 // 这里只定皮肤和它要用的字体，其余逻辑都在页面底部的主脚本里。
 (function () {
-  // 末尾的 'lcd' 是 config.js 没加载出来时的兜底，正常走 PICBED_CONFIG.skin
-  var d = (window.PICBED_CONFIG || {}).skin || 'lcd';
+  // 末尾的 'lcd-olive' 是 config.js 没加载出来时的兜底，正常走 PICBED_CONFIG.skin。
+  // 改 config.js 的默认皮肤时，这里跟着改一下保持一致。
+  var d = (window.PICBED_CONFIG || {}).skin || 'lcd-olive';
   try { d = localStorage.getItem('picbed_skin') || d; } catch (e) { /* 隐私模式读不到就用默认 */ }
   if (d === 'modern') document.documentElement.removeAttribute('data-skin');
   else document.documentElement.setAttribute('data-skin', d);
-  // 只有 LCD 与 Y2K 用得上这两个字体族，其余皮肤不必替它们付这次下载
-  if (d === 'lcd' || d === 'y2k') {
+  // 只有 LCD 一族与 Y2K 用得上这两个字体族，其余皮肤不必替它们付这次下载。
+  // 注意是**前缀**匹配：LCD 有五个变体（lcd-olive / lcd-inv / …），写成 d === 'lcd' 会漏掉它们，
+  // 那样默认皮肤的点阵字就悄悄退成宋体了。
+  // 地址挂在 window 上，运行期切皮肤时主脚本要拿同一个（免得两处字符串写岔）
+  window.PICBED_FONT_HREF = 'https://fonts.googleapis.com/css2?family=DotGothic16&family=Orbitron:wght@500;700;900&family=Chakra+Petch:wght@400;600;700&display=swap';
+  if (/^(lcd|y2k)/.test(d)) {
     var l = document.createElement('link');
     l.rel = 'stylesheet';
-    l.href = 'https://fonts.googleapis.com/css2?family=DotGothic16&family=Orbitron:wght@500;700;900&family=Chakra+Petch:wght@400;600;700&display=swap';
+    l.href = window.PICBED_FONT_HREF;
+    l.setAttribute('data-skin-font', '');
     document.head.appendChild(l);
   }
+
+  // CRT 滤镜同样要在首帧前定好，否则开着它刷新会先正常画一遍再蒙上扫描线。
+  // 注意「本机存过」要能覆盖 config 的默认值 —— 所以判的是 null 而不是真假：
+  // 用户关掉之后存的是 '0'，那也是个有效选择，不能被 config 里的 true 顶回来。
+  var crt = !!(window.PICBED_CONFIG || {}).crt;
+  try {
+    var savedCrt = localStorage.getItem('picbed_crt');
+    if (savedCrt !== null) crt = savedCrt === '1';
+  } catch (e) { /* 隐私模式读不到就用默认 */ }
+  if (crt) document.documentElement.setAttribute('data-crt', '');
 })();
 </script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath fill='%23fff' fill-opacity='.45' d='M19.5 5 30 23.5H9z'/%3E%3Cpath fill='%23fff' fill-rule='evenodd' d='M11.5 8.5 22 27H1zM11.5 13.7a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E">
@@ -430,6 +446,16 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 /* 风格菜单左侧的对勾：未选中时占位但不可见，免得选中项一换整列文字就左右跳 */
 #themeMenu button .ti { visibility: hidden; }
 #themeMenu button.on .ti { visibility: visible; }
+
+/* 风格菜单的二级（目前只有 LCD 一族）：点父项就地展开，不做向右飞的浮层 ——
+   菜单本来就贴在顶栏右端，再往右飞会出屏，而且手机上也没有 hover 可用。 */
+#themeMenu button .caret { width: 13px; height: 13px; margin-left: auto; transition: transform .15s; }
+#themeMenu button.sub-head.open .caret { transform: rotate(90deg); }
+/* 一道竖线把子项圈起来 —— 只靠缩进的话，展开后它们和 Y2K、PDA 那几项看起来是平级的 */
+#themeMenu .sub-list { display: flex; flex-direction: column; border-left: 2px solid var(--border); margin: 2px 0 2px 15px; }
+#themeMenu .sub-list button { padding-left: 10px; font-size: 12.5px; }
+/* 展开后整张菜单有十行，矮屏 / 手机上会顶出视口，给个上限 */
+#themeMenu { max-height: calc(100vh - 90px); overflow-y: auto; }
 .gallery-more { text-align: center; margin-top: 16px; }
 
 /* 设置弹窗 */
@@ -810,121 +836,214 @@ html[data-skin="skeuo"] #ctxMenu .ctx-sep, html[data-skin="skeuo"] #themeMenu .c
 html[data-skin="skeuo"] #ctxMenu button.danger:hover { text-shadow: none; background: linear-gradient(#e5736c, #c93c37); color: #fff; }
 html[data-skin="skeuo"] #ctxMenu button.danger:hover .ic { color: #fff; }
 
-/* ---------- 皮肤 · 功能机 LCD 点阵（诺基亚 3310 / Game Boy） ---------- */
-html[data-skin="lcd"] {
+/* ---------- 皮肤 · 功能机 LCD 点阵（诺基亚 3310 / Game Boy） ----------
+   这一族有五个配色变体，共用下面同一套形态规则（描边、硬阴影、网点、段码进度条…），
+   区别只在 --lcd-* 这几个变量上。所以形态规则的选择器统一用 [data-skin^="lcd"] 前缀匹配，
+   变体各自只写一个变量块（见本节末尾），加一版新配色就是几行的事。
+
+   变量的方向不能搞反：LCD 里「亮 = 有像素」，所以抬一档的面（纸面-2）永远比纸面亮、
+   沉一档的面（纸面-3）永远比纸面暗。反色版是把 ink 和 paper 的角色对调，
+   不是把整个调色板取反。 */
+html[data-skin^="lcd"] {
   color-scheme: light;
-  --bg: #9bbc0f; --text: #0f380f; --muted: #306230;
-  --panel: #a8c911; --panel-2: #7d9c0c;
-  --glass: rgba(155, 188, 15, .94); --glass-strong: rgba(168, 201, 17, .97);
-  --border: #0f380f; --border-strong: #0f380f;
-  --accent: #0f380f; --accent-soft: rgba(15, 56, 15, .18);
+  /* 点阵像素：描边、正文、进度条的「亮块」 */
+  --lcd-ink: #0f380f;
+  --lcd-ink-rgb: 15, 56, 15;
+  /* 屏底 */
+  --lcd-paper: #9bbc0f;
+  --lcd-paper-rgb: 155, 188, 15;
+  /* 抬一档的面：文件名条、相册图标、弹窗、右键菜单 */
+  --lcd-paper-2: #a8c911;
+  --lcd-paper-2-rgb: 168, 201, 17;
+  /* 沉一档的面：被遮罩的卡、骨架格 */
+  --lcd-paper-3: #7d9c0c;
+  /* 输入框、目录树：比纸面更亮，做出「凹陷」 */
+  --lcd-field: #c4d97a;
+  /* 顶栏，比纸面略沉，滚上去时能和内容分开 */
+  --lcd-bar: #8bac0f;
+  /* 次要文字 */
+  --lcd-dim: #306230;
+  /* 照片滤镜。亮版是「滤成灰绿点阵」；反色版要换成先把照片翻成负片再染绿 */
+  --lcd-photo-filter: grayscale(1) brightness(1.06) contrast(1.35) sepia(1) hue-rotate(35deg) saturate(2.4);
+  /* 网点层。亮版用深色网点乘上去压暗；暗版要反过来用亮网点 screen */
+  --lcd-dot: rgba(15, 56, 15, .4);
+  --lcd-dot-blend: multiply;
+
+  --bg: var(--lcd-paper); --text: var(--lcd-ink); --muted: var(--lcd-dim);
+  --panel: var(--lcd-paper-2); --panel-2: var(--lcd-paper-3);
+  --glass: rgba(var(--lcd-paper-rgb), .94); --glass-strong: rgba(var(--lcd-paper-2-rgb), .97);
+  --border: var(--lcd-ink); --border-strong: var(--lcd-ink);
+  --accent: var(--lcd-ink); --accent-soft: rgba(var(--lcd-ink-rgb), .18);
   /* 主站拿 --grad 当 background 用，所以这里给纯色也合法 */
-  --grad: #0f380f; --grad-hover: #0f380f;
-  --danger: #0f380f; --danger-soft: rgba(15, 56, 15, .2); --ok: #0f380f;
-  --shadow-sm: none; --shadow-md: none; --shadow-lg: 4px 4px 0 rgba(15, 56, 15, .4);
-  --ring: 0 0 0 3px rgba(15, 56, 15, .5);
+  --grad: var(--lcd-ink); --grad-hover: var(--lcd-ink);
+  --danger: var(--lcd-ink); --danger-soft: rgba(var(--lcd-ink-rgb), .2); --ok: var(--lcd-ink);
+  --shadow-sm: none; --shadow-md: none; --shadow-lg: 4px 4px 0 rgba(var(--lcd-ink-rgb), .4);
+  --ring: 0 0 0 3px rgba(var(--lcd-ink-rgb), .5);
   --radius: 0; --radius-sm: 0;
   --glow-1: transparent; --glow-2: transparent;
 }
-html[data-skin="lcd"] body {
+html[data-skin^="lcd"] body {
   /* 中文回退到宋体：Windows 上小字号自带点阵字形，够味；Latin 交给 DotGothic16 */
   font-family: "Zpix", "DotGothic16", "SimSun", "宋体", "MS Gothic", monospace;
   letter-spacing: .02em; -webkit-font-smoothing: none;
-  background-color: #9bbc0f;
-  background-image: radial-gradient(rgba(15, 56, 15, .17) 1px, transparent 1.15px);
+  background-color: var(--lcd-paper);
+  background-image: radial-gradient(rgba(var(--lcd-ink-rgb), .17) 1px, transparent 1.15px);
   background-size: 4px 4px;
 }
-html[data-skin="lcd"] .appbar { background: #8bac0f; border-bottom: 4px solid #0f380f; box-shadow: 0 4px 0 rgba(15, 56, 15, .18); }
-html[data-skin="lcd"] .logo { border: 3px solid #0f380f; }
-html[data-skin="lcd"] .logo .ic { color: #9bbc0f; }
-html[data-skin="lcd"] h1 .zh { color: #306230; }
-html[data-skin="lcd"] .tabs { border: 3px solid #0f380f; padding: 0; gap: 0; }
-html[data-skin="lcd"] .tabs button { font-weight: 700; padding: 8px 12px; }
-html[data-skin="lcd"] .tabs button + button { border-left: 3px solid #0f380f; }
-html[data-skin="lcd"] .tabs button.active { background: #0f380f; color: #9bbc0f; }
+html[data-skin^="lcd"] .appbar { background: var(--lcd-bar); border-bottom: 4px solid var(--lcd-ink); box-shadow: 0 4px 0 rgba(var(--lcd-ink-rgb), .18); }
+html[data-skin^="lcd"] .logo { border: 3px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .logo .ic { color: var(--lcd-paper); }
+html[data-skin^="lcd"] h1 .zh { color: var(--lcd-dim); }
+html[data-skin^="lcd"] .tabs { border: 3px solid var(--lcd-ink); padding: 0; gap: 0; }
+html[data-skin^="lcd"] .tabs button { font-weight: 700; padding: 8px 12px; }
+html[data-skin^="lcd"] .tabs button + button { border-left: 3px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .tabs button.active { background: var(--lcd-ink); color: var(--lcd-paper); }
 /* 按钮：带硬阴影的实体块，按下时整块位移，像真被摁进去 */
-html[data-skin="lcd"] .btn { border: 3px solid #0f380f; font-weight: 700; box-shadow: 3px 3px 0 #0f380f; }
-html[data-skin="lcd"] .btn:hover { box-shadow: 3px 3px 0 #0f380f; }
-html[data-skin="lcd"] .btn:active { transform: translate(3px, 3px); box-shadow: none; }
-html[data-skin="lcd"] .btn.primary, html[data-skin="lcd"] #selectModeBtn.active { background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .btn.ghost { background: transparent; box-shadow: none; }
-html[data-skin="lcd"] .btn.ghost:active { transform: none; }
-html[data-skin="lcd"] .btn.danger { color: #0f380f; }
-html[data-skin="lcd"] .btn.danger-solid { background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .urlbar input, html[data-skin="lcd"] .field input, html[data-skin="lcd"] .field select {
-  border: 3px solid #0f380f; background: #c4d97a; color: #0f380f; font-family: inherit;
-  box-shadow: inset 3px 3px 0 rgba(15, 56, 15, .18);
+html[data-skin^="lcd"] .btn { border: 3px solid var(--lcd-ink); font-weight: 700; box-shadow: 3px 3px 0 var(--lcd-ink); }
+html[data-skin^="lcd"] .btn:hover { box-shadow: 3px 3px 0 var(--lcd-ink); }
+html[data-skin^="lcd"] .btn:active { transform: translate(3px, 3px); box-shadow: none; }
+html[data-skin^="lcd"] .btn.primary, html[data-skin^="lcd"] #selectModeBtn.active { background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .btn.ghost { background: transparent; box-shadow: none; }
+html[data-skin^="lcd"] .btn.ghost:active { transform: none; }
+html[data-skin^="lcd"] .btn.danger { color: var(--lcd-ink); }
+html[data-skin^="lcd"] .btn.danger-solid { background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .urlbar input, html[data-skin^="lcd"] .field input, html[data-skin^="lcd"] .field select {
+  border: 3px solid var(--lcd-ink); background: var(--lcd-field); color: var(--lcd-ink); font-family: inherit;
+  box-shadow: inset 3px 3px 0 rgba(var(--lcd-ink-rgb), .18);
 }
-html[data-skin="lcd"] .gallery-path { border: 3px solid #0f380f; background: #a8c911; box-shadow: 3px 3px 0 rgba(15, 56, 15, .25); }
-html[data-skin="lcd"] .gallery-path .crumb { font-weight: 700; text-decoration: underline; }
-html[data-skin="lcd"] .gallery-path .crumb.current { text-decoration: none; background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .spin { border: 3px solid rgba(15, 56, 15, .3); border-top-color: #0f380f; }
-/* 照片统一滤成灰绿点阵 —— 相册看起来就像在老手机屏上翻 */
-html[data-skin="lcd"] .grid img,
-html[data-skin="lcd"] .result img,
-html[data-skin="lcd"] .q-thumb,
-html[data-skin="lcd"] .lightbox img {
-  filter: grayscale(1) brightness(1.06) contrast(1.35) sepia(1) hue-rotate(35deg) saturate(2.4);
+html[data-skin^="lcd"] .gallery-path { border: 3px solid var(--lcd-ink); background: var(--lcd-paper-2); box-shadow: 3px 3px 0 rgba(var(--lcd-ink-rgb), .25); }
+html[data-skin^="lcd"] .gallery-path .crumb { font-weight: 700; text-decoration: underline; }
+html[data-skin^="lcd"] .gallery-path .crumb.current { text-decoration: none; background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .spin { border: 3px solid rgba(var(--lcd-ink-rgb), .3); border-top-color: var(--lcd-ink); }
+/* 缩略图统一滤成屏幕色 —— 相册看起来就像在老手机屏上翻。
+   灯箱的大图**故意不滤**：网格是「屏幕」的一部分，可以染色；点开就是要看这张照片
+   真实的样子，再糊一层绿就本末倒置了。相框式的描边照旧留着。 */
+html[data-skin^="lcd"] .grid img,
+html[data-skin^="lcd"] .result img,
+html[data-skin^="lcd"] .q-thumb {
+  filter: var(--lcd-photo-filter);
 }
-html[data-skin="lcd"] .grid figure { border-width: 3px; background: #9bbc0f; }
+html[data-skin^="lcd"] .grid figure { border-width: 3px; background: var(--lcd-paper); }
 /* 网点层：盖住照片与文件名，做出「屏幕」的质感。
    z-index 1 = 在照片之上、在勾选框/公开按钮/遮罩提示之下，所以不挡操作。 */
-html[data-skin="lcd"] .grid figure::after {
+html[data-skin^="lcd"] .grid figure::after {
   content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background-image: radial-gradient(rgba(15, 56, 15, .4) 1px, transparent 1.3px);
-  background-size: 3px 3px; mix-blend-mode: multiply;
+  background-image: radial-gradient(var(--lcd-dot) 1px, transparent 1.3px);
+  background-size: 3px 3px; mix-blend-mode: var(--lcd-dot-blend);
 }
-html[data-skin="lcd"] .grid figcaption { border-top: 3px solid #0f380f; background: #a8c911; font-weight: 700; }
-html[data-skin="lcd"] .folder-tile .folder-icon { background: #a8c911; border-bottom: 3px solid #0f380f; }
-html[data-skin="lcd"] .folder-tile .folder-icon .ic { stroke-width: 2; }
-html[data-skin="lcd"] .folder-tile .folder-actions button,
-html[data-skin="lcd"] .grid figure .pub-toggle,
-html[data-skin="lcd"] .sel-check { border: 3px solid #0f380f; background: #9bbc0f; box-shadow: 2px 2px 0 #0f380f; }
-html[data-skin="lcd"] .pub-badge { border: 2px solid #0f380f; background: #9bbc0f; color: #0f380f; font-weight: 700; }
-html[data-skin="lcd"] .pub-badge.r-G, html[data-skin="lcd"] .pub-badge.r-R12,
-html[data-skin="lcd"] .pub-badge.r-R15, html[data-skin="lcd"] .pub-badge.r-R18 { background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .grid figure.is-covered { background: #7d9c0c; }
-html[data-skin="lcd"] .grid figure .cover-hint { background: rgba(15, 56, 15, .72); color: #9bbc0f; }
-html[data-skin="lcd"] .grid figure .cover-btn { border: 2px solid #9bbc0f; background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .grid figure .dl-pct { border: 2px solid #0f380f; background: #9bbc0f; color: #0f380f; font-weight: 700; }
+html[data-skin^="lcd"] .grid figcaption { border-top: 3px solid var(--lcd-ink); background: var(--lcd-paper-2); font-weight: 700; }
+html[data-skin^="lcd"] .folder-tile .folder-icon { background: var(--lcd-paper-2); border-bottom: 3px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .folder-tile .folder-icon .ic { stroke-width: 2; }
+html[data-skin^="lcd"] .folder-tile .folder-actions button,
+html[data-skin^="lcd"] .grid figure .pub-toggle,
+html[data-skin^="lcd"] .sel-check { border: 3px solid var(--lcd-ink); background: var(--lcd-paper); box-shadow: 2px 2px 0 var(--lcd-ink); }
+html[data-skin^="lcd"] .pub-badge { border: 2px solid var(--lcd-ink); background: var(--lcd-paper); color: var(--lcd-ink); font-weight: 700; }
+html[data-skin^="lcd"] .pub-badge.r-G, html[data-skin^="lcd"] .pub-badge.r-R12,
+html[data-skin^="lcd"] .pub-badge.r-R15, html[data-skin^="lcd"] .pub-badge.r-R18 { background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .grid figure.is-covered { background: var(--lcd-paper-3); }
+html[data-skin^="lcd"] .grid figure .cover-hint { background: rgba(var(--lcd-ink-rgb), .72); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .grid figure .cover-btn { border: 2px solid var(--lcd-paper); background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .grid figure .dl-pct { border: 2px solid var(--lcd-ink); background: var(--lcd-paper); color: var(--lcd-ink); font-weight: 700; }
 /* 进度一律做成段码条 */
-html[data-skin="lcd"] .grid figure .dl-bar b, html[data-skin="lcd"] .q-fill,
-html[data-skin="lcd"] .lb-dl-bar b, html[data-skin="lcd"] .page-progress i {
-  background-color: #0f380f;
-  background-image: repeating-linear-gradient(90deg, transparent 0 5px, #9bbc0f 5px 7px);
+html[data-skin^="lcd"] .grid figure .dl-bar b, html[data-skin^="lcd"] .q-fill,
+html[data-skin^="lcd"] .lb-dl-bar b, html[data-skin^="lcd"] .page-progress i {
+  background-color: var(--lcd-ink);
+  background-image: repeating-linear-gradient(90deg, transparent 0 5px, var(--lcd-paper) 5px 7px);
 }
-html[data-skin="lcd"] .q-bar { background: #7d9c0c; border: 2px solid #0f380f; }
-html[data-skin="lcd"] .q-item { background: #a8c911; }
-html[data-skin="lcd"] .q-thumb { border: 2px solid #0f380f; }
-html[data-skin="lcd"] .dialog-box { border: 4px solid #0f380f; background: #9bbc0f; box-shadow: 6px 6px 0 rgba(15, 56, 15, .35); }
-html[data-skin="lcd"] .tree,
-html[data-skin="lcd"] #probeResult, html[data-skin="lcd"] #uploadRating {
-  border: 3px solid #0f380f; background: #c4d97a; box-shadow: inset 3px 3px 0 rgba(15, 56, 15, .16);
+html[data-skin^="lcd"] .q-bar { background: var(--lcd-paper-3); border: 2px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .q-item { background: var(--lcd-paper-2); }
+html[data-skin^="lcd"] .q-thumb { border: 2px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .dialog-box { border: 4px solid var(--lcd-ink); background: var(--lcd-paper); box-shadow: 6px 6px 0 rgba(var(--lcd-ink-rgb), .35); }
+html[data-skin^="lcd"] .tree,
+html[data-skin^="lcd"] #probeResult, html[data-skin^="lcd"] #uploadRating {
+  border: 3px solid var(--lcd-ink); background: var(--lcd-field); box-shadow: inset 3px 3px 0 rgba(var(--lcd-ink-rgb), .16);
 }
-html[data-skin="lcd"] .lightbox img { border: 4px solid #0f380f; }
-html[data-skin="lcd"] .lightbox-close { border: 3px solid #0f380f; background: #9bbc0f; color: #0f380f; box-shadow: 3px 3px 0 #0f380f; }
-html[data-skin="lcd"] .lightbox-actions .btn { color: #0f380f; }
-html[data-skin="lcd"] .lb-dl-bar { background: rgba(15, 56, 15, .3); border: 2px solid #0f380f; }
-html[data-skin="lcd"] #toast { border: 3px solid #0f380f; background: #0f380f; color: #9bbc0f; font-weight: 700; box-shadow: 3px 3px 0 rgba(15, 56, 15, .4); }
-html[data-skin="lcd"] #toast.error { background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] .upload-fab { border: 3px solid #0f380f; background: #9bbc0f; color: #0f380f; box-shadow: 4px 4px 0 rgba(15, 56, 15, .45); }
-html[data-skin="lcd"] .upload-fab.idle { background: #a8c911; }
-html[data-skin="lcd"] .fab-badge { border: 2px solid #9bbc0f; background: #0f380f; color: #9bbc0f; line-height: 16px; }
-html[data-skin="lcd"] .fab-badge.ok { background: #0f380f; }
-html[data-skin="lcd"] .upload-panel { border: 3px solid #0f380f; background: #a8c911; }
-html[data-skin="lcd"] .drop-overlay-box { border: 3px solid #0f380f; background: #a8c911; }
-html[data-skin="lcd"] #marquee { border: 2px solid #0f380f; background: rgba(15, 56, 15, .16); }
-html[data-skin="lcd"] .grid figure.ph::before, html[data-skin="lcd"] .sk-tile .sk-img, html[data-skin="lcd"] .sk-tile .sk-cap {
-  background-color: #7d9c0c;
+html[data-skin^="lcd"] .lightbox img { border: 4px solid var(--lcd-ink); }
+html[data-skin^="lcd"] .lightbox-close { border: 3px solid var(--lcd-ink); background: var(--lcd-paper); color: var(--lcd-ink); box-shadow: 3px 3px 0 var(--lcd-ink); }
+html[data-skin^="lcd"] .lightbox-actions .btn { color: var(--lcd-ink); }
+html[data-skin^="lcd"] .lb-dl-bar { background: rgba(var(--lcd-ink-rgb), .3); border: 2px solid var(--lcd-ink); }
+html[data-skin^="lcd"] #toast { border: 3px solid var(--lcd-ink); background: var(--lcd-ink); color: var(--lcd-paper); font-weight: 700; box-shadow: 3px 3px 0 rgba(var(--lcd-ink-rgb), .4); }
+html[data-skin^="lcd"] #toast.error { background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] .upload-fab { border: 3px solid var(--lcd-ink); background: var(--lcd-paper); color: var(--lcd-ink); box-shadow: 4px 4px 0 rgba(var(--lcd-ink-rgb), .45); }
+html[data-skin^="lcd"] .upload-fab.idle { background: var(--lcd-paper-2); }
+html[data-skin^="lcd"] .fab-badge { border: 2px solid var(--lcd-paper); background: var(--lcd-ink); color: var(--lcd-paper); line-height: 16px; }
+html[data-skin^="lcd"] .fab-badge.ok { background: var(--lcd-ink); }
+html[data-skin^="lcd"] .upload-panel { border: 3px solid var(--lcd-ink); background: var(--lcd-paper-2); }
+html[data-skin^="lcd"] .drop-overlay-box { border: 3px solid var(--lcd-ink); background: var(--lcd-paper-2); }
+html[data-skin^="lcd"] #marquee { border: 2px solid var(--lcd-ink); background: rgba(var(--lcd-ink-rgb), .16); }
+html[data-skin^="lcd"] .grid figure.ph::before, html[data-skin^="lcd"] .sk-tile .sk-img, html[data-skin^="lcd"] .sk-tile .sk-cap {
+  background-color: var(--lcd-paper-3);
 }
-html[data-skin="lcd"] #ctxMenu, html[data-skin="lcd"] #themeMenu {
-  border: 3px solid #0f380f; background: #9bbc0f; box-shadow: 4px 4px 0 rgba(15, 56, 15, .4);
+html[data-skin^="lcd"] #ctxMenu, html[data-skin^="lcd"] #themeMenu {
+  border: 3px solid var(--lcd-ink); background: var(--lcd-paper); box-shadow: 4px 4px 0 rgba(var(--lcd-ink-rgb), .4);
 }
-html[data-skin="lcd"] #ctxMenu button, html[data-skin="lcd"] #themeMenu button { font-weight: 700; }
-html[data-skin="lcd"] #ctxMenu button:hover, html[data-skin="lcd"] #themeMenu button:hover { background: #0f380f; color: #9bbc0f; }
-html[data-skin="lcd"] #ctxMenu button:hover .ic, html[data-skin="lcd"] #themeMenu button:hover .ic { color: #9bbc0f; }
-html[data-skin="lcd"] #ctxMenu button.danger:hover { background: #0f380f; }
-html[data-skin="lcd"] #ctxMenu .ctx-sep, html[data-skin="lcd"] #themeMenu .ctx-sep { background: #0f380f; height: 2px; }
+html[data-skin^="lcd"] #ctxMenu button, html[data-skin^="lcd"] #themeMenu button { font-weight: 700; }
+html[data-skin^="lcd"] #ctxMenu button:hover, html[data-skin^="lcd"] #themeMenu button:hover { background: var(--lcd-ink); color: var(--lcd-paper); }
+html[data-skin^="lcd"] #ctxMenu button:hover .ic, html[data-skin^="lcd"] #themeMenu button:hover .ic { color: var(--lcd-paper); }
+html[data-skin^="lcd"] #ctxMenu button.danger:hover { background: var(--lcd-ink); }
+html[data-skin^="lcd"] #ctxMenu .ctx-sep, html[data-skin^="lcd"] #themeMenu .ctx-sep { background: var(--lcd-ink); height: 2px; }
+
+/* ----- LCD 的五个配色变体：只覆盖变量，形态规则一行不动 -----
+   上面的默认变量块就是「亮版」，所以 lcd 自己不需要再来一块。 */
+
+/* 反色砖绿：DMG 的暗色版。ink 与 paper 角色对调 —— 亮的是像素，暗的是屏底 */
+html[data-skin="lcd-inv"] {
+  color-scheme: dark;
+  --lcd-ink: #9bbc0f; --lcd-ink-rgb: 155, 188, 15;
+  --lcd-paper: #0f380f; --lcd-paper-rgb: 15, 56, 15;
+  --lcd-paper-2: #164a16; --lcd-paper-2-rgb: 22, 74, 22;
+  --lcd-paper-3: #0a2a0a;
+  --lcd-field: #1a521a;
+  --lcd-bar: #0b2c0b;
+  --lcd-dim: #6f9c6f;
+  --lcd-photo-filter: grayscale(1) brightness(.82) contrast(1.2) sepia(1) hue-rotate(55deg) saturate(2.4);
+  --lcd-dot: rgba(155, 188, 15, .22);
+  --lcd-dot-blend: screen;
+}
+/* 琥珀终端 */
+html[data-skin="lcd-amber"] {
+  color-scheme: dark;
+  --lcd-ink: #ffb000; --lcd-ink-rgb: 255, 176, 0;
+  --lcd-paper: #1c1204; --lcd-paper-rgb: 28, 18, 4;
+  --lcd-paper-2: #2a1c07; --lcd-paper-2-rgb: 42, 28, 7;
+  --lcd-paper-3: #120b02;
+  --lcd-field: #33220a;
+  --lcd-bar: #150d03;
+  --lcd-dim: #b07d18;
+  --lcd-photo-filter: grayscale(1) brightness(.85) contrast(1.15) sepia(1) saturate(3.2) hue-rotate(-6deg);
+  --lcd-dot: rgba(255, 176, 0, .2);
+  --lcd-dot-blend: screen;
+}
+/* 诺基亚背光：暗青绿底 + 薄荷色像素 */
+html[data-skin="lcd-backlight"] {
+  color-scheme: dark;
+  --lcd-ink: #7ff0c8; --lcd-ink-rgb: 127, 240, 200;
+  --lcd-paper: #0d2a2a; --lcd-paper-rgb: 13, 42, 42;
+  --lcd-paper-2: #143a38; --lcd-paper-2-rgb: 20, 58, 56;
+  --lcd-paper-3: #082020;
+  --lcd-field: #1a4a44;
+  --lcd-bar: #0a2222;
+  --lcd-dim: #5fa89a;
+  --lcd-photo-filter: grayscale(1) brightness(.88) contrast(1.2) sepia(1) hue-rotate(110deg) saturate(2.2);
+  --lcd-dot: rgba(127, 240, 200, .18);
+  --lcd-dot-blend: screen;
+}
+/* 暗橄榄：不反色，只是把亮版整体压暗并去饱和。
+   ink 要压得比「压暗后的纸面」更深一截，否则按钮文字对比度不够 —— 压暗会同时拉低
+   ink 和纸面的亮度，两者的比值不主动维持的话会一起塌下来。 */
+html[data-skin="lcd-olive"] {
+  color-scheme: light;
+  --lcd-ink: #141a0c; --lcd-ink-rgb: 20, 26, 12;
+  --lcd-paper: #767e57; --lcd-paper-rgb: 118, 126, 87;
+  --lcd-paper-2: #848c63; --lcd-paper-2-rgb: 132, 140, 99;
+  --lcd-paper-3: #616846;
+  --lcd-field: #939a74;
+  --lcd-bar: #697050;
+  --lcd-dim: #2c331e;
+  --lcd-photo-filter: grayscale(1) brightness(.86) contrast(1.3) sepia(1) hue-rotate(35deg) saturate(1.5);
+  --lcd-dot: rgba(20, 26, 12, .4);
+  --lcd-dot-blend: multiply;
+}
 
 /* ---------- 皮肤 · Y2K 霓虹翻盖机（i-mode / 日系赛博） ---------- */
 html[data-skin="y2k"] {
@@ -1171,9 +1290,63 @@ html[data-skin="pda"] #ctxMenu button:hover .ic, html[data-skin="pda"] #themeMen
 html[data-skin="pda"] #ctxMenu button.danger:hover { background: #000080; color: #ffffff; }
 html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-sep { background: #a0a0a0; height: 1px; margin: 2px 4px; }
 
+/* ==========================================================================
+   CRT 滤镜（叠加层）
+   --------------------------------------------------------------------------
+   和皮肤是正交的两件事：皮肤决定「这台设备长什么样」，CRT 决定「这块屏好不好」。
+   所以它是个独立开关，能叠在任意皮肤上，也能不叠。全部落在一个固定覆盖层里，
+   pointer-events:none —— 只做光学效果，一点布局都不碰，也不需要任何皮肤配合。
+
+   强度抽成了三个变量，嫌重嫌轻改这三个数就行，不用去动下面的渐变。
+   ========================================================================== */
+:root {
+  --crt-scan: .22;      /* 扫描线深度 */
+  --crt-grille: .045;   /* 荫罩（RGB 细条纹）强度，很淡，只用来让白色不「死白」 */
+  --crt-vignette: .55;  /* 四角压暗 */
+  --crt-edge: .42;      /* 四条边往里压暗的深度，见下面 ::after 的说明 */
+}
+#crtLayer { display: none; }
+html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+#crtLayer::before,
+#crtLayer::after { content: ''; position: absolute; inset: 0; }
+
+/* 扫描线 + 荫罩。两者叠在一起才是「显像管」，只有横条的话看着像贴了张条纹纸 */
+#crtLayer::before {
+  background-image:
+    repeating-linear-gradient(90deg,
+      rgba(255, 0, 0, var(--crt-grille)) 0 1px,
+      rgba(0, 255, 0, var(--crt-grille)) 1px 2px,
+      rgba(0, 0, 255, var(--crt-grille)) 2px 3px),
+    repeating-linear-gradient(0deg,
+      rgba(0, 0, 0, var(--crt-scan)) 0 1px, transparent 1px 3px);
+  animation: crt-flicker 5.5s steps(1, end) infinite;
+}
+/* 管面：暗角 + 一圈边缘内阴影 + 一块球面反光。
+   三者缺一不可 ——
+   · 只做径向暗角的话，暗的只有四角，四条边还是平的，看着像「贴了个暗角贴纸」；
+   · 边缘内阴影把四条边一起带上，才像玻璃朝观察者鼓出来、到边上卷下去；
+   · 反光用椭圆而不是斜条，斜条是「窗玻璃」，椭圆高光才是「球面管」。 */
+#crtLayer::after {
+  background-image:
+    radial-gradient(ellipse 42% 30% at 26% 12%, rgba(255, 255, 255, .07), transparent 72%),
+    radial-gradient(ellipse 72% 68% at 50% 50%, transparent 34%, rgba(0, 0, 0, var(--crt-vignette)) 100%);
+  box-shadow: inset 0 0 96px 20px rgba(0, 0, 0, var(--crt-edge));
+}
+/* 亮度微闪。幅度刻意压得很小：一是大幅闪烁有光敏风险（WCAG 2.3.1 卡在每秒 3 次，
+   这里约 5.5 秒一次，远在限内），二是幅度一大看久了很累。
+   用 steps 是为了让它「跳」而不是「呼吸」—— 显像管是瞬时的。 */
+@keyframes crt-flicker {
+  0%, 96% { opacity: 1; }
+  97% { opacity: .87; }
+  98% { opacity: 1; }
+  99.5% { opacity: .93; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .page-progress i { width: 100%; transform: none; animation: none; background: var(--grad); }
+  /* 上面那条已经把动画按停了，这里再显式写一次：闪烁有光敏风险，值得写死 */
+  #crtLayer::before { animation: none; }
   .sk-tile .sk-img, .sk-tile .sk-cap, .grid figure.ph::before { background-image: none; background-color: var(--border); }
 }
 </style>
@@ -1433,6 +1606,9 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
 <div id="toast"></div>
 <div id="ctxMenu" hidden></div>
 <div id="themeMenu" hidden></div>
+<!-- CRT 滤镜的覆盖层。显隐走 <html data-crt> 而不是 hidden 属性：
+     属性能在首帧之前定下来（见 <head> 那段脚本），hidden 得等主脚本跑完才摘，会闪一下 -->
+<div id="crtLayer"></div>
 <div id="marquee" hidden></div>
 
 <script>
@@ -4261,18 +4437,56 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
   // 皮肤挂在 <html data-skin> 上，没有该属性 = 原来的「现代」皮肤。
   // 初值由 <head> 里那段内联脚本在首帧前定好，这里管菜单、切换和记忆。
   const SKIN_KEY = 'picbed_skin';
+  // items = 这一项是分组，父项只负责展开，真正的皮肤是子项。
+  // 目前只有 LCD 一族需要分组：它带五个配色变体，平铺进主菜单会把它撑得没法看。
   const SKINS = [
     { id: 'modern', name: '现代简约' },
     { id: 'skeuo', name: '早期智能机 · 拟物' },
-    { id: 'lcd', name: '功能机 · LCD 点阵' },
+    { group: 'lcd', name: '功能机 · LCD 点阵', items: [
+      { id: 'lcd', name: '亮版 · 砖绿' },
+      { id: 'lcd-inv', name: '暗版 · 反色砖绿' },
+      { id: 'lcd-amber', name: '暗版 · 琥珀终端' },
+      { id: 'lcd-backlight', name: '暗版 · 诺基亚背光' },
+      { id: 'lcd-olive', name: '暗版 · 暗橄榄' },
+    ] },
     { id: 'y2k', name: 'Y2K · 霓虹翻盖机' },
     { id: 'pda', name: 'PDA · Windows Mobile' },
   ];
   const themeMenu = $('themeMenu');
   const themeBtn = $('themeBtn');
+  // 每个分组记下父项按钮和它的成员皮肤 id，用来决定父项要不要打勾
+  const skinGroups = [];
 
   function currentSkin() {
     return document.documentElement.getAttribute('data-skin') || 'modern';
+  }
+
+  // 选中后**不关菜单**：换皮肤常常是要连着比几套，关掉再点开很烦。
+  // 收起走点别处 / Esc / 再点一次「风格」按钮，三条路都在下面接着。
+  function skinButton(id, name) {
+    const b = document.createElement('button');
+    b.dataset.skin = id;
+    b.appendChild(icon('check', 'ti'));
+    const sp = document.createElement('span');
+    sp.textContent = name;
+    b.appendChild(sp);
+    b.onclick = () => applySkin(id);
+    return b;
+  }
+
+  // LCD 与 Y2K 的字体要联网取。首帧脚本只在「一开始就是这两族」时才挂 <link>，
+  // 运行期从菜单切过去的话这里得补上 —— 否则 Orbitron 永远不来，Y2K 的标题会退成系统字体。
+  const NEED_FONT = /^(lcd|y2k)/;
+  function ensureFont(id) {
+    if (!NEED_FONT.test(id)) return;
+    if (document.head.querySelector('link[data-skin-font]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = window.PICBED_FONT_HREF;
+    link.setAttribute('data-skin-font', '');
+    // 字体到手后行宽会变，菜单若正开着得重新夹一次，否则可能顶出右边
+    link.addEventListener('load', () => { if (!themeMenu.hidden) positionThemeMenu(); });
+    document.head.appendChild(link);
   }
 
   // remember=false 用于启动时同步菜单勾选，避免把默认值当成用户选择写进存储
@@ -4282,28 +4496,77 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
     if (remember !== false) {
       try { localStorage.setItem(SKIN_KEY, id); } catch (e) { /* 存不下就算了，不影响使用 */ }
     }
-    for (const b of themeMenu.querySelectorAll('button')) b.classList.toggle('on', b.dataset.skin === id);
+    for (const b of themeMenu.querySelectorAll('button[data-skin]')) b.classList.toggle('on', b.dataset.skin === id);
+    // 父项自己不是皮肤：只要组里有成员被选中，它就跟着打勾
+    for (const g of skinGroups) g.head.classList.toggle('on', g.ids.indexOf(id) >= 0);
+    ensureFont(id);
+    // 菜单选中后不关，所以换皮肤时它正开着：各皮肤的字体和字号不同，菜单宽度会变，
+    // 左边界是开的时候定死的，不重夹一次就可能顶出右边
+    if (!themeMenu.hidden) positionThemeMenu();
   }
 
-  // 菜单项的外观直接复用右键菜单那套规则（见「右键菜单」一节），四套皮肤里都跟着一起换
+  // 菜单项的外观直接复用右键菜单那套规则（见「右键菜单」一节），各皮肤里都跟着一起换
   for (const s of SKINS) {
-    const b = document.createElement('button');
-    b.dataset.skin = s.id;
-    b.appendChild(icon('check', 'ti'));
+    if (!s.items) { themeMenu.appendChild(skinButton(s.id, s.name)); continue; }
+    const head = document.createElement('button');
+    head.className = 'sub-head';
+    head.appendChild(icon('check', 'ti'));
     const sp = document.createElement('span');
     sp.textContent = s.name;
-    b.appendChild(sp);
-    b.onclick = () => { applySkin(s.id); closeThemeMenu(); };
-    themeMenu.appendChild(b);
+    head.appendChild(sp);
+    head.appendChild(icon('chevron', 'caret'));
+    const list = document.createElement('div');
+    list.className = 'sub-list';
+    list.hidden = true;
+    for (const it of s.items) list.appendChild(skinButton(it.id, it.name));
+    head.onclick = () => {
+      list.hidden = !list.hidden;
+      head.classList.toggle('open', !list.hidden);
+    };
+    themeMenu.appendChild(head);
+    themeMenu.appendChild(list);
+    skinGroups.push({ head, ids: s.items.map((i) => i.id) });
   }
 
-  function openThemeMenu() {
-    themeMenu.hidden = false;
+  // ---------- CRT 滤镜 ----------
+  // 与皮肤正交：皮肤是「这台设备长什么样」，CRT 是「这块屏好不好」。
+  // 所以它单占一行、单存一个键，换皮肤不影响它，它也不影响换皮肤。
+  const CRT_KEY = 'picbed_crt';
+  let crtOn = document.documentElement.hasAttribute('data-crt'); // 首帧脚本已经定过了
+  const crtBtn = document.createElement('button');
+  crtBtn.appendChild(icon('check', 'ti'));
+  {
+    const sp = document.createElement('span');
+    sp.textContent = 'CRT 滤镜';
+    crtBtn.appendChild(sp);
+  }
+  crtBtn.onclick = () => applyCrt(!crtOn);
+
+  function applyCrt(on, remember) {
+    crtOn = !!on;
+    // 显隐交给 <html data-crt>，和首帧脚本走同一条路，免得两套开关打架
+    if (crtOn) document.documentElement.setAttribute('data-crt', '');
+    else document.documentElement.removeAttribute('data-crt');
+    if (remember !== false) {
+      try { localStorage.setItem(CRT_KEY, crtOn ? '1' : '0'); } catch (e) { /* 存不下就算了 */ }
+    }
+    crtBtn.classList.toggle('on', crtOn);
+  }
+
+  themeMenu.appendChild(document.createElement('div')).className = 'ctx-sep';
+  themeMenu.appendChild(crtBtn);
+  applyCrt(crtOn, false); // 只同步勾选，不写存储
+
+  // 贴着按钮下方展开；右边越界就往回收，窄屏上不至于跑到屏幕外
+  function positionThemeMenu() {
     const r = themeBtn.getBoundingClientRect();
-    // 贴着按钮下方展开；右边越界就往回收，窄屏上不至于跑到屏幕外
     const left = Math.max(8, Math.min(r.left, window.innerWidth - themeMenu.offsetWidth - 8));
     themeMenu.style.left = left + 'px';
     themeMenu.style.top = (r.bottom + 6) + 'px';
+  }
+  function openThemeMenu() {
+    themeMenu.hidden = false;
+    positionThemeMenu();
     themeBtn.setAttribute('aria-expanded', 'true');
   }
   function closeThemeMenu() {
