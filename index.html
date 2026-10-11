@@ -3786,6 +3786,37 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     }));
   }
 
+  // 原图尺寸表：图片键 → [宽, 高]。只服务一件事 —— 灯箱那格在整张图到达之前就占成最终大小
+  // （见 setLightboxPlaceholder）。键在本站是不可变的（见 schema.sql），所以量到一次就永远有效。
+  const dimCache = new Map();
+
+  /**
+   * 从**首块**字节里量出原图的宽高，量不出来返回 null。
+   *
+   * 为什么要量：灯箱的 img 本来要等整张图下完才有固有尺寸，在那之前框子是塌的，
+   * 于是大图落下来的一瞬间整个灯箱重新布局一次。可尺寸比整张图早得多就能拿到 ——
+   * 文件头里的 SOF / IHDR 一被解析，naturalWidth 就已经是整张图的最终值了。
+   *
+   * 交给游离的 img 去解，而不是自己扒 JPEG / PNG 的文件头：手写的话得认全格式，
+   * 还得处理 EXIF 方向（旋转 90° 的照片宽高是反的，占位会横过来），而这些浏览器本来就会。
+   * 代价只有一次「解到文件头为止」的解码 —— 只喂首块（几十 KB）而不是整张，就是为了让这个代价封顶。
+   * 截断的图照样会派发 load（增量显形全靠这件事），所以这里不必等它下完。
+   */
+  function dimProbe(buf, mime) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(new Blob([buf], { type: mime || '' }));
+      const pre = new Image();
+      const done = () => {
+        const w = pre.naturalWidth, h = pre.naturalHeight; // 解不开的格式（HEIC 之类）给的是 0
+        URL.revokeObjectURL(url);
+        resolve(w && h ? [w, h] : null);
+      };
+      pre.onload = done;
+      pre.onerror = done; // 连文件头都读不全（超长 EXIF / ICC 把它顶到首块之外）：当没量到
+      pre.src = url;
+    });
+  }
+
   // 换上一批字节；返回是否真的换了。revoke 旧 blob 是安全的：img 已经拿着解码后的位图。
   // job.cancelled 是给灯箱用的：关灯箱只 abort 在途请求，不改 dlEpoch（那会连网格一起废掉），
   // 所以正在等解码的那次换帧得自己认账 —— 否则它回来时会往已经关掉的灯箱上挂一个新 blob，谁都不再回收。
@@ -3858,9 +3889,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   }
 
   // 灯箱的进度：进度画在信息区那条，收尾是收起它，失效判据是「还是当前这张、灯箱还开着」
-  function dlBoxSink(job) {
+  function dlBoxSink(job, key) {
     const box = $('lightboxDl'), text = $('lightboxDlText'), fill = $('lightboxDlFill');
     return {
+      // 首块字节一到就有尺寸了：先把那一格占成最终大小，整张图落下来时才不会「重新布局」一下。
+      // 判活交给调用方（dlStream 里那两问）—— 这块字节回来时用户可能已经翻到下一张了，
+      // 那时动的是别人的框子。
+      // job.started 是「已经有真像素了」（增量显形换过帧）：这时再塞占位图会把那半张顶掉，
+      // 只剩个空框，比不占位还糟 —— 那就不动它，反正尺寸量到了，下一张也用得上。
+      // 尺寸早就量过（看过一次 / 悬停时预取量过）就整个不给 dims：没有它，dlStream 连首块都不解，
+      // 而占位在 openLightbox 里已经摆好了。
+      dims: dimCache.has(key) ? null : (d) => { dimCache.set(key, d); if (!job.started) setLightboxPlaceholder(d); },
       show: () => { box.hidden = false; },
       paint: () => {
         text.textContent = job.total ? job.pct + '%' : '';
@@ -3907,10 +3946,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       const maxReveals = !revealable ? 0 : (job.total > DL_STREAM_CAP ? 0 : (job.total > DL_REVEAL_BIG ? 3 : DL_REVEAL_MAX));
       const reader = res.body.getReader();
       let lastReveal = 0, reveals = 0;
+      // 灯箱（以及悬停预取）要尺寸：首块就是文件头所在的那一块，量它比等整张图早得多（见 dimProbe）。
+      // 网格卡片不要 —— 几百个格子各多解一次码，换来的东西格子里根本用不上。
+      let probing = !!sink.dims;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
+        if (probing) {
+          probing = false;
+          dimProbe(value, mime).then((d) => { if (d && epoch === dlEpoch && sink.alive()) sink.dims(d); });
+        }
         job.bytes += value.length;
         if (job.total && job.bytes > job.total) job.total = 0; // 响应被压缩之类：总长不可信了，退回不定长
         const pct = job.total ? Math.min(99, Math.floor((job.bytes / job.total) * 100)) : 0; // 还没读完不许写 100%
@@ -3963,10 +4009,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   function pfHover(key) {
     pfCancel(); // 换到别的卡片：上一张的意图作废
     if (dlOk === false || lightboxItem) return; // 这条路走不通、或正在看大图，都不预取
-    pfTimer = setTimeout(() => pfStart(publicUrl(key)), PF_HOVER_MS);
+    pfTimer = setTimeout(() => pfStart(publicUrl(key), key), PF_HOVER_MS);
   }
 
-  async function pfStart(url) {
+  async function pfStart(url, key) {
     if (document.hidden || lightboxItem) return;
     const ctrl = new AbortController();
     pfCtrl = ctrl;
@@ -3974,7 +4020,19 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       const res = await fetch(url, { mode: 'cors', signal: ctrl.signal, priority: 'low' });
       if (!res.ok) return;
       if ((Number(res.headers.get('content-length')) || 0) > PF_MAX_BYTES) { ctrl.abort(); return; }
-      await res.arrayBuffer(); // 读完才会真的落进 HTTP 缓存，只拿响应头不算
+      // 读完才会真的落进 HTTP 缓存，只拿响应头不算。那就自己读，读的时候顺手用首块量一下尺寸：
+      // 鼠标在这张上停够过，点开时灯箱那格就已经是最终大小，连首块都不用等（见 dimProbe）。
+      if (!res.body || !res.body.getReader) { await res.arrayBuffer(); return; }
+      const reader = res.body.getReader();
+      let probing = !dimCache.has(key);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (probing) {
+          probing = false;
+          dimProbe(value, res.headers.get('content-type')).then((d) => { if (d) dimCache.set(key, d); });
+        }
+      }
     } catch (e) {
       /* 预取失败无所谓：点开时照旧走正常流程 */
     } finally {
@@ -4224,11 +4282,32 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     btn.classList.toggle('on', !hidden);
   }
 
+  /**
+   * 一张空 SVG，唯一的用处是**固有尺寸 = 原图尺寸**。空的不画任何东西，露出来的还是
+   * .lightbox img 那层深色底，看着和「图还没到」一模一样。
+   *
+   * 为什么不用 width / height 两个特性（HTML 里防抖动的那个老办法）：特性给的是**指定**尺寸，
+   * 而指定尺寸被 max-width / max-height 夹的时候，两条轴各夹各的、比例就丢了 ——
+   * 实测 1600×900 的图占成 920×550，真图到场却是 920×518。CSS 的 aspect-ratio 也一样
+   * （浏览器不会因为 max-height 收紧了就把宽度倒推回来）。
+   * 只有**固有尺寸**才会像真图那样「按比例缩进框里」，所以给一张真有那个尺寸的图。
+   */
+  function dimPlaceholder(w, h) {
+    return 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"></svg>');
+  }
+
+  /** 把灯箱那格按 [宽, 高] 占上；传 null 就撤掉占位（等于「这张还没有尺寸」） */
+  function setLightboxPlaceholder(dims) {
+    const img = $('lightboxImg');
+    if (dims) img.src = dimPlaceholder(dims[0], dims[1]);
+    else img.removeAttribute('src');
+  }
+
   function openLightbox(item) {
     lightboxItem = item;
     const url = publicUrl(item.key);
     // 原图走同一套流式下载：几 MB 的大图是全站最需要进度的地方。
-    // 先把 src 清掉，免得新图还没到就先行显示上一张（灯箱的 img 会记住上次的图）。
     if (lightboxJob) { // 上一次还没收干净（连点两张）：连它的 blob 一起收掉，别留在集合里
       lightboxJob.cancelled = true;
       if (lightboxJob.ctrl) lightboxJob.ctrl.abort();
@@ -4236,10 +4315,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     }
     pfCancel(); // 预取和这次下载是同一个 URL，别让它俩并行各下一遍
     const img = $('lightboxImg');
-    img.removeAttribute('src');
+    // 占位也顺手把上一张清掉了（灯箱的 img 会记住上次的图）。量过尺寸的从第一帧起就是最终大小，
+    // 没量过的等首块字节（见 dlBoxSink.dims）—— 两个来源给的是同一对数字，谁先到都一样。
+    setLightboxPlaceholder(dimCache.get(item.key) || null);
     $('lightboxDl').hidden = true;
     lightboxJob = { img, url, rawUrl: url, thumb: false, epoch: dlEpoch, bytes: 0, total: 0, pct: 0, started: false, blobUrl: null };
-    dlStream(lightboxJob, dlBoxSink(lightboxJob)).catch(() => {});
+    dlStream(lightboxJob, dlBoxSink(lightboxJob, item.key)).catch(() => {});
     bindLightboxName(item);
     $('downloadBtn').onclick = () => downloadImage(item, $('downloadBtn'));
     $('renameBtn').onclick = () => renameImage(item.key);
