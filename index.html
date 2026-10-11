@@ -504,6 +504,13 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .tree-label .ic { width: 14px; height: 14px; color: var(--muted); }
 .tree-label:hover { background: var(--accent-soft); color: var(--accent); }
 .tree-label:hover .ic { color: var(--accent); }
+/* 当前位置：树一打开就指着它，移动时不用再猜自己在哪一层 */
+.tree-label.current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.tree-label.current .ic { color: var(--accent); }
+.tree-tag { font-size: 10px; font-weight: 400; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; margin-left: 6px; flex: none; }
+/* 当不了目标的节点（把相册移进它自己）：摆在那儿看得见，但点不动 */
+.tree-label.disabled { opacity: .38; cursor: not-allowed; }
+.tree-label.disabled:hover { background: none; color: var(--text); }
 
 /* 灯箱 */
 .lightbox { position: fixed; inset: 0; background: rgba(6, 9, 18, .80); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
@@ -1266,6 +1273,7 @@ html[data-skin="pda"] #probeResult, html[data-skin="pda"] #uploadRating {
 }
 html[data-skin="pda"] .tree-label:hover { background: #000080; color: #ffffff; }
 html[data-skin="pda"] .tree-label:hover .ic { color: #ffffff; }
+html[data-skin="pda"] .tree-label.disabled:hover { background: none; color: var(--text); } /* 点不动的节点不该有「可点」的反馈 */
 html[data-skin="pda"] .lightbox img { padding: 3px; background: #d4d0c8; border: 3px solid; border-color: #ffffff #404040 #404040 #ffffff; }
 html[data-skin="pda"] .lightbox-close { background: #d4d0c8; color: #000; border: 2px solid; border-color: #ffffff #404040 #404040 #ffffff; }
 html[data-skin="pda"] .lightbox-actions .btn { color: #000; }
@@ -1604,7 +1612,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       <span id="promptHelp" class="hint"></span>
     </label>
     <div id="promptTreeWrap" hidden>
-      <div class="hint" style="margin-bottom:2px;">点击下方相册可把路径填入输入框</div>
+      <div class="hint" id="promptTreeHint" style="margin-bottom:2px;">点击下方相册可把路径填入输入框</div>
       <div id="promptTree" class="tree"></div>
     </div>
     <div class="dialog-actions">
@@ -2002,7 +2010,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     for (const f of files) {
       if (!isImageFile(f)) { skippedNonImage++; continue; }
       if (f.size > 50 * 1024 * 1024) { skippedTooBig++; continue; }
-      // 文件夹上传时把相对路径里的子目录并进相册名，保留目录结构
+      // 文件夹上传时把相对路径里的目录段并进相册名，保留目录结构
+      // （"我的相册/2024/a.jpg" → 「我的相册/2024」）。**整个上传链路只在这里算一次**：
+      // relDirs 不幂等，对同一路径再取一次目录段就会多出一层（A → A/A），见 uploadFile。
       const album = albumJoin(base, relDirs(f.__relPath || f.name));
       if (sanitizeAlbum(album) === null) { skippedReserved++; continue; } // 含保留段 _picbed
       enqueue(f, album);
@@ -2170,7 +2180,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const name = document.createElement('div');
     name.className = 'q-name';
     name.textContent = file.__relPath || file.name;
-    name.title = name.textContent;
+    // 上传文件夹时路径和相册容易看混（"我的相册/a.jpg" 会进「我的相册」），标题里把落点写全
+    name.title = uploadAlbum ? `${name.textContent}\n→ 相册「${uploadAlbum}」` : `${name.textContent}\n→ 相册「根目录」`;
     const bar = document.createElement('div');
     bar.className = 'q-bar';
     const fill = document.createElement('div');
@@ -2193,8 +2204,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   async function uploadFile(file, item) {
     const { fill, status } = item;
-    // 文件夹上传时把相对路径里的子目录并进相册名，保留目录结构
-    const album = albumJoin(item.album || '', relDirs(file.__relPath || file.name));
+    // 相册在 addFiles 里就定型了（含文件夹上传的目录段），这里原样用。
+    // 早先这里又算了一次 relDirs —— 那是个 bug：relDirs("A/x.jpg") = "A"，
+    // 再拼到已经算好的 "A" 后面就成了 "A/A"，于是上传 A 文件夹会凭空多出一层。
+    const album = item.album || '';
 
     const image = await uploadOne(file, album, currentUploadRating(), (p) => {
       const pct = Math.min(100, Math.round(p * 100));
@@ -2591,24 +2604,28 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         resolve(val);
       };
       if (o.tree) {
-        // 点击树节点：填入路径；若输入框里已有一个纯名称（如重命名时的相册名）则保留在末尾
-        const onPick = (p) => {
-          const cur = input.value.trim();
-          const keep = cur && !cur.includes('/') ? cur : '';
-          input.value = keep ? p + keep : p;
-          input.focus();
-        };
-        // 自动补全的查询词取「目录部分」，纯名称不参与过滤（否则重命名时树会被自己的名字过滤掉）
+        // 点击树节点 = 选中它（输入框里装的就是最终值，整段替换）
+        const onPick = (p) => { input.value = p; input.focus(); };
+        // 自动补全的查询词取「目录部分」，最后一段当名字看（选中 /旅行 后继续敲 = 在它下面建）
         const treeQuery = () => {
           const v = input.value.trim().replace(/^\/+/, '');
           return v.endsWith('/') ? v : v.split('/').slice(0, -1).join('/');
         };
-        const refresh = () => renderAlbumTree(treeQuery, onPick);
-        input.oninput = refresh;
+        // 只有用户**打过字**才拿输入框当筛选词。一上来就按预填值过滤的话，
+        // 树会退化成一条结果列表，「展开到当前层级」就没地方展开了。
+        let typed = false;
+        const refresh = () => renderAlbumTree(typed ? treeQuery : null, onPick, {
+          reveal: o.treeReveal,     // 展开到这一层（移动时就是当前位置）
+          disabled: o.treeDisabled, // 点不了的节点（如要把相册移进它自己）
+          root: o.treeRoot,         // 树顶加一行「根目录」
+        });
+        input.oninput = () => { typed = true; refresh(); };
         refresh();
       } else {
         input.oninput = null;
       }
+      const treeHint = $('promptTreeHint');
+      if (treeHint) treeHint.textContent = o.treeHint || '点击下方相册可把路径填入输入框';
       input.onkeydown = (e) => {
         if (e.key === 'Enter') { e.preventDefault(); finish(input.value); }
       };
@@ -2701,12 +2718,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     return root;
   }
 
-  // 递归渲染一级节点；子层懒展开
-  function appendTreeLevel(node, container, onPick) {
+  /**
+   * 递归渲染一级节点；子层懒展开。
+   * view.reveal 那条路径上的层级**一上来就展开**，并把那一行标成「当前位置」——
+   * 移动图片/相册时，目的地十有八九就在自己待着的这一层附近，不该让人一层层点开。
+   */
+  function appendTreeLevel(node, container, onPick, view) {
     const kids = [...node.children.values()];
     if (!kids.length) return;
     const ul = document.createElement('ul');
     for (const k of kids) {
+      const rel = k.rel.replace(/\/+$/, ''); // k.rel 形如 '旅行/2024/'，去掉尾斜杠才好比
       const li = document.createElement('li');
       const row = document.createElement('div');
       row.className = 'tree-row';
@@ -2721,7 +2743,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
           e.stopPropagation();
           if (sub.hidden && !sub.dataset.built) {
             sub.dataset.built = '1';
-            appendTreeLevel(k, sub, onPick);
+            appendTreeLevel(k, sub, onPick, view);
           }
           sub.hidden = !sub.hidden;
           caret.classList.toggle('open', !sub.hidden);
@@ -2731,18 +2753,62 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       label.type = 'button';
       label.className = 'tree-label';
       label.textContent = k.name;
-      label.title = '/' + k.rel;
-      label.onclick = () => onPick('/' + k.rel);
+      label.title = '/' + rel;
+      // view.disabled：当不了目标的节点（把相册移进它自己/子相册）直接点不动，别等确认了才报错
+      if (view && view.disabled && view.disabled(rel)) {
+        label.disabled = true;
+        label.classList.add('disabled');
+        label.title = '不能移动到自身或其子相册下';
+      } else {
+        label.onclick = () => onPick('/' + rel);
+      }
+      if (view && view.reveal === rel) {
+        label.classList.add('current');
+        const tag = document.createElement('span');
+        tag.className = 'tree-tag';
+        tag.textContent = '当前位置';
+        label.appendChild(tag);
+        view.current = label; // 渲染完要滚到这一行
+      }
       row.append(caret, label);
       li.append(row, sub);
       ul.appendChild(li);
+      // 在 reveal 这条路径上：连子层一起摊开（先建好再显示，省得展开时闪一下）
+      if (k.children.size && view && view.expand.has(rel)) {
+        sub.dataset.built = '1';
+        appendTreeLevel(k, sub, onPick, view);
+        sub.hidden = false;
+        caret.classList.add('open');
+      }
     }
     container.appendChild(ul);
   }
 
-  // 渲染目录树：输入框有内容时改为匹配结果列表（自动补全），否则展示完整树
+  /** 完整树顶上那行「根目录」：移到根是很常见的操作，不该只能靠留空输入框来表达 */
+  function appendTreeRoot(box, onPick) {
+    const ul = document.createElement('ul');
+    const li = document.createElement('li');
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    const pad = document.createElement('button'); // 占住 caret 那一列，和下面的行对齐
+    pad.type = 'button';
+    pad.className = 'tree-caret leaf';
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'tree-label';
+    label.textContent = '全部（根目录）';
+    label.onclick = () => onPick('/');
+    row.append(pad, label);
+    li.appendChild(row);
+    ul.appendChild(li);
+    box.appendChild(ul);
+  }
+
+  // 渲染目录树：输入框有内容时改为匹配结果列表（自动补全），否则展示完整树。
+  // opts.reveal = 展开到哪一层并高亮（移动时传当前位置）；opts.disabled = 点不了的节点；opts.root = 顶上补一行根目录
   let treeRenderSeq = 0;
-  async function renderAlbumTree(getQuery, onPick) {
+  async function renderAlbumTree(getQuery, onPick, opts) {
+    const o = opts || {};
     const seq = ++treeRenderSeq;
     const box = $('promptTree');
     const empty = (msg) => {
@@ -2780,7 +2846,23 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       box.appendChild(ul);
       return;
     }
-    appendTreeLevel(albumTreeFromPaths(paths), box, onPick);
+    // 完整树。reveal 那条路径上的每一层（含它自己）都摊开，这样当前位置就在眼前
+    const reveal = String(o.reveal || '').replace(/^\/+|\/+$/g, '');
+    const expand = new Set();
+    let acc = '';
+    for (const seg of reveal.split('/').filter(Boolean)) {
+      acc = acc ? acc + '/' + seg : seg;
+      expand.add(acc);
+    }
+    const view = { reveal, expand, disabled: o.disabled, current: null };
+    if (o.root) appendTreeRoot(box, onPick);
+    appendTreeLevel(albumTreeFromPaths(paths), box, onPick, view);
+    // 展开之后内容变长了，把高亮那行滚到视野中间 —— 深相册里一打开就知道自己在哪
+    if (view.current) {
+      const boxRect = box.getBoundingClientRect();
+      const rowRect = view.current.getBoundingClientRect();
+      box.scrollTop = Math.max(0, box.scrollTop + (rowRect.top - boxRect.top) - (box.clientHeight - rowRect.height) / 2);
+    }
   }
 
   // 「加载更多」按钮的加载态：转圈 + 文案，只改 .lbl，不碰按钮里的其它节点
@@ -3388,34 +3470,48 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   // 相册的「重命名 / 移动 / 删除」（悬浮按钮与右键菜单共用）。
   // 三者都只改数据库里的 album 列 —— R2 里一个对象都不动，所以**图片直链永远不变**。
+  //
+  // 改名和移动是**两件事**，就走两个入口：改名只动最后一段、层级原样不动；
+  // 移动只换父级、名字原样不动。服务端那条 UPDATE 两件事都能干，但界面上不该让
+  // 「把 A 改成 B」也得先看懂整条路径 —— 从前那个「新的位置（含相册名）」就是这毛病。
   async function renameAlbumDialog(album, name) {
     const raw = await promptDialog({
-      title: '重命名 / 移动相册',
-      label: '新的位置（含相册名）',
+      title: `重命名相册「${name}」`,
+      label: '新的名字',
       value: name,
-      help: '可用 / 创建多级；以 / 开头表示从图床根目录开始；点击下方相册可填入其路径',
-      tree: true,
+      help: '只改这一层的名字，里面的图片和子相册跟着一起改；直链不变。要换位置请用「移动到其他位置」。',
+      confirmText: '重命名',
     });
-    if (raw === null || !String(raw).trim()) return;
-    const to = parseTargetAlbum(raw);
-    if (to === null) return toast('_picbed 是保留目录名，不能使用', true);
-    if (to === album) return;
-    if (inSubtree(to, album)) return toast('不能移动到自身或其子相册', true);
-    await moveAlbum(album, to);
+    if (raw === null) return;
+    const clean = sanitizeAlbum(raw);
+    if (clean === null) return toast('_picbed 是保留目录名，不能使用', true);
+    if (!clean) return toast('名字不能为空', true);
+    if (clean.includes('/')) return toast('名字里不能带 /（那是在改层级），要换位置请用「移动到其他位置」', true);
+    if (clean === name) return;
+    await moveAlbum(album, albumJoin(albumParent(album), clean));
   }
 
   async function moveAlbumDialog(album, name) {
+    const curParent = albumParent(album); // 它现在待在哪儿（'' = 根）
     const raw = await promptDialog({
       title: `移动相册「${name}」`,
       label: '移动到哪个相册',
+      // 预填当前位置：直接点确定 = 没挪窝，不会手一滑就把整个相册丢到根目录去
+      value: curParent ? '/' + curParent : '',
       placeholder: '留空 = 移到根目录',
-      help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
+      help: '只换位置，名字不变。树里已经展开到它现在待的那一层（带「当前位置」标记的那个）；点一下即可作为目标，以 / 开头表示从图床根目录算起。',
+      confirmText: '移动',
       tree: true,
+      treeReveal: curParent,
+      treeRoot: true,
+      treeHint: '点相册 = 移到它里面；已展开并标出它现在所在的层级',
+      // 自己和自己肚子里的相册都点不动 —— 否则子树会自我嵌套
+      treeDisabled: (rel) => rel === album || rel.startsWith(album + '/'),
     });
     if (raw === null) return;
     const parent = parseTargetAlbum(raw);
     if (parent === null) return toast('_picbed 是保留目录名，不能使用', true);
-    if (parent === albumParent(album)) return toast('目标就是当前位置', true);
+    if (parent === curParent) return toast('目标就是当前位置', true);
     if (inSubtree(parent, album)) return toast('不能移动到自身或其子相册', true);
     await moveAlbum(album, albumJoin(parent, name));
   }
@@ -3459,7 +3555,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     actions.className = 'folder-actions';
     const rename = document.createElement('button');
     rename.appendChild(icon('pencil'));
-    rename.title = '重命名相册（可用 / 创建多级）';
+    rename.title = '重命名相册（只改名字，不动层级）';
     rename.onclick = (e) => { e.stopPropagation(); renameAlbumDialog(album, name); };
     const move = document.createElement('button');
     move.appendChild(icon('folder-move'));
@@ -3484,8 +3580,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         // 分享的是「公开画廊里的这个相册」—— 管理员自己看的是全部，访客只看得到可陈列的那些
         { icon: 'link', label: '复制相册链接（给访客）', onClick: () => copyText(albumShareUrl(album)) },
         '-',
-        { icon: 'pencil', label: '重命名 / 移动相册', onClick: () => renameAlbumDialog(album, name) },
-        { icon: 'folder-move', label: '移动到其他位置', onClick: () => moveAlbumDialog(album, name) },
+        { icon: 'pencil', label: '重命名相册…', onClick: () => renameAlbumDialog(album, name) },
+        { icon: 'folder-move', label: '移动相册到其他位置…', onClick: () => moveAlbumDialog(album, name) },
         '-',
         { icon: 'trash', label: '删除相册', danger: true, onClick: () => deleteAlbumDialog(album, name) },
       ]);
@@ -3521,6 +3617,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       help: '相册在你往里面传第一张图时就创建好了。这里先带你进入该相册。',
       confirmText: '进入',
       tree: true,
+      treeReveal: galleryAlbum, // 同样展开到当前层级：多半是要在这里面再开一层
     });
     if (raw === null || !String(raw).trim()) return;
     const album = parseTargetAlbum(raw);
@@ -3656,9 +3753,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       title: `移动 ${keys.length} 张图片`,
       label: '移动到哪个相册',
       placeholder: '留空 = 移到根目录',
-      help: '可用 / 指定多级；以 / 开头表示从图床根目录开始；点击下方相册可直接填入',
+      help: '可用 / 指定多级；以 / 开头表示从图床根目录开始。树里已经展开到你当前所在的相册，点一下即可。',
       confirmText: '移动',
       tree: true,
+      treeReveal: galleryAlbum, // 展开到当前层级：附近就是最常去的目标，不必一层层点开
+      treeRoot: true,
+      treeHint: '点相册 = 移进它；已展开并标出你当前所在的层级',
     });
     if (raw === null) return;
     // 注意用 === null 判错：根目录是空串（合法目标），不能用 !target
