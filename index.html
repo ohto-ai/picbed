@@ -1297,7 +1297,7 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
    所以它是个独立开关，能叠在任意皮肤上，也能不叠。全部落在一个固定覆盖层里，
    pointer-events:none —— 只做光学效果，一点布局都不碰，也不需要任何皮肤配合。
 
-   强度抽成了三个变量，嫌重嫌轻改这三个数就行，不用去动下面的渐变。
+   强度都抽成了变量，嫌重嫌轻改这几个数就行，不用去动下面的渐变。
    ========================================================================== */
 :root {
   --crt-scan: .22;      /* 扫描线深度 */
@@ -1306,11 +1306,32 @@ html[data-skin="pda"] #ctxMenu .ctx-sep, html[data-skin="pda"] #themeMenu .ctx-s
   --crt-roll: 6s;       /* 亮带滚一整屏要多久 */
   --crt-vignette: .55;  /* 四角压暗 */
   --crt-edge: .42;      /* 四条边往里压暗的深度，见下面 ::after 的说明 */
+  --crt-curve: .06;     /* 屏幕弧度：黑边形状 + 扫描线弯曲。纯覆盖层，一点命中代价都不花 */
+  --crt-warp: .045;     /* 画面位移：让画面本身也跟着弯。花命中代价 —— 见 README 的「已知取舍」 */
 }
 #crtLayer { display: none; }
 html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+
+/* 镜头畸变：把屏幕**下面那一层**按球面往外推，于是整块画面鼓起来、四角往里收。
+   挂在 backdrop-filter 上而不是给页面套一层 filter，是因为 backdrop-filter 只吃背景、
+   完全不参与布局 —— 页面结构一格都不用动，灯箱/弹窗这些 fixed 层也不会被 filter
+   拽成「相对 body 定位」（那会把它们从视口里甩出去，整个站就废了）。
+   代价是位移只有 Chromium 系认：Safari / Firefox 解析不了 backdrop-filter 里的 url()，
+   @supports 会整个拦住，它们照旧拿到平面扫描线 —— 不是坏掉，只是没弯。
+   位移图是 JS 现画的（见主脚本「CRT 滤镜」一节）：R 存 x 位移、G 存 y 位移、128 = 不动。 */
+@supports (backdrop-filter: url(#crtWarp)) or (-webkit-backdrop-filter: url(#crtWarp)) {
+  html[data-crt] #crtLayer {
+    -webkit-backdrop-filter: url(#crtWarp);
+    backdrop-filter: url(#crtWarp);
+  }
+}
 #crtLayer::before,
 #crtLayer::after { content: ''; position: absolute; inset: 0; }
+/* 光栅边界：钳位区（采样点被钉在画面边缘的那一圈）本来就是拉花的，索性照显像管的样子压黑，
+   四角因此收出圆角 —— 真实管子的光栅也到不了角上，外面就是管子本体。
+   曲线解的是「采样点刚好落在画面边缘」，跟钳位区严丝合缝，边缘往里一个像素都不多吃。
+   画在 ::before 之后、::after 之前：黑边盖掉自己那圈的扫描线，暗角再盖回来。 */
+#crtBezel { position: absolute; inset: 0; width: 100%; height: 100%; fill: #000; fill-rule: evenodd; }
 
 /* 扫描线 + 荫罩。两者叠在一起才是「显像管」，只有横条的话看着像贴了张条纹纸 */
 #crtLayer::before {
@@ -1636,9 +1657,18 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 <div id="toast"></div>
 <div id="ctxMenu" hidden></div>
 <div id="themeMenu" hidden></div>
+<!-- 镜头畸变的位移图。feImage 的 href 要主脚本现画现塞，所以滤镜得挂在文档里、不能写死在 CSS。
+     filter 区域刻意写成 0 0 100% 100%：默认是 -10% -10% 120% 120%，往外扩了一圈，
+     那样位移图的中心和屏心对不上，四角会先于边缘失真。 -->
+<svg class="icon-sprite" aria-hidden="true" focusable="false">
+  <filter id="crtWarp" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feImage id="crtWarpMap" preserveAspectRatio="none" result="map"/>
+    <feDisplacementMap id="crtWarpDisp" in="SourceGraphic" in2="map" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
 <!-- CRT 滤镜的覆盖层。显隐走 <html data-crt> 而不是 hidden 属性：
      属性能在首帧之前定下来（见 <head> 那段脚本），hidden 得等主脚本跑完才摘，会闪一下 -->
-<div id="crtLayer"><i id="crtSweep"></i></div>
+<div id="crtLayer"><i id="crtSweep"></i><svg id="crtBezel" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path id="crtBezelPath"/></svg></div>
 <div id="marquee" hidden></div>
 
 <script>
@@ -4662,6 +4692,303 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       try { localStorage.setItem(CRT_KEY, crtOn ? '1' : '0'); } catch (e) { /* 存不下就算了 */ }
     }
     crtBtn.classList.toggle('on', crtOn);
+    if (crtOn) crtSync(); else crtHoverPatch(false);  // 开着就重画（顺手捡回改过的变量），关掉就还原
+  }
+
+  // ---- 镜头畸变的位移图 ----
+  // feDisplacementMap 吃的是一张查找表：R 通道给 x 位移、G 通道给 y 位移，128 = 不动，
+  // 0 / 255 = 往负 / 正方向各偏半个 scale。于是「屏面朝观察者鼓出来」这件事就只是
+  // 「位移量 = 离屏心的距离 × 弧度系数」—— 越靠边采样点往外偏得越多，画面中间被顶出来。
+  //
+  // 钳位那一步是整段里最要紧的：桶形畸变在边缘要往画面**外面**采样，而 Chromium 对出界的
+  // 处理是**镜像回绕**（feDisplacementMap 的 edgeMode 它不认，实测 duplicate / none 一个样），
+  // 于是屏顶会冒出一条上下翻转的顶栏 —— 看着像重影，其实是照镜子。
+  // 好在采样点是算出来的：夹回 [-1,1] 再减掉原位，等于自己做了 duplicate 边界，
+  // 出界区变成「最边上那行像素被拉长」，跟真实镜头、跟各家 CRT 着色器一个路子，基本看不出来。
+  //
+  // 为什么不预先把这张图做成 PNG 放进仓库：feDisplacementMap 的 scale 只有一个数，横竖共用，
+  // 而横向位移要按屏宽、纵向按屏高归一化，差着一个 h/w —— 这个比例只有拿到视口尺寸才知道。
+  // 所以纵向那一半在画图时就乘好了，scale 单独给「半个屏宽」（它认的是 px，不是比例）。
+  const WARP_MAP_PX = 256;                                  // 位移图长边：位移是低频的，再大只是白占内存
+  const WARP_XLINK = 'http://www.w3.org/1999/xlink';
+  // 和 CSS 里那道 @supports 是同一件事：认不出 backdrop-filter 里的 url() 就别白画一张图
+  const crtWarpOk = typeof CSS !== 'undefined' && CSS.supports &&
+    (CSS.supports('backdrop-filter', 'url(#crtWarp)') || CSS.supports('-webkit-backdrop-filter', 'url(#crtWarp)'));
+
+  function crtAmount(name) {
+    const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return isFinite(v) && v > 0 ? v : 0;
+  }
+  const crtWarpAmount = () => crtAmount('--crt-warp');    // 画面位移（花命中代价）
+  const crtCurveAmount = () => crtAmount('--crt-curve');  // 屏幕形状（不花）
+  let crtWarpK = 0;   // 当前生效的画面位移弧度，指针补偿要用；0 = 画面没弯
+
+  /**
+   * 光栅边界那条曲线的路径。归一化 ±1 的坐标系里，采样点刚好落在画面边缘就是
+   *   |x| * (1 + k*(x² + y²)) = 1
+   * 这个式子对 x 和对 y 是**同一个条件**（两边同除一下就知道），所以可见区就是
+   * 一条闭合曲线的内部，不是四条边各管各的。给定另一轴的位置解这一轴能到多远，
+   * 用二分（左端单调，解唯一）—— 顺便这条曲线是不动点对合的：X(X(t)) = t。
+   * 返回的是 viewBox 0..100 的路径串，外框减掉这条曲线，evenodd 一填就是黑边。
+   */
+  function crtBezelPath(k) {
+    const edge = (t) => {                 // 解 x*(1 + k*(x² + t²)) = 1
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 20; i++) {
+        const m = (lo + hi) / 2;
+        if (m * (1 + k * (m * m + t * t)) < 1) lo = m; else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    let lo = 0, hi = 1;                   // 对角线上两段弧的交点：t*(1 + 2k*t²) = 1
+    for (let i = 0; i < 20; i++) {
+      const m = (lo + hi) / 2;
+      if (m * (1 + 2 * k * m * m) < 1) lo = m; else hi = m;
+    }
+    const c = (lo + hi) / 2;
+    const N = 20;
+    // 第一象限：从 +x 轴绕到 +y 轴（两段弧在 (c,c) 接上），再镜像出另外三象限拼成闭环
+    const arc = [];
+    for (let i = 0; i <= N; i++) { const t = (c * i) / N; arc.push([edge(t), t]); }
+    for (let i = N - 1; i >= 0; i--) { const t = (c * i) / N; arc.push([t, edge(t)]); }
+    const ring = arc
+      .concat(arc.map(([x, y]) => [-x, y]).reverse())
+      .concat(arc.map(([x, y]) => [-x, -y]))
+      .concat(arc.map(([x, y]) => [x, -y]).reverse());
+    const pt = ([x, y]) => ((x + 1) * 50).toFixed(3) + ' ' + ((y + 1) * 50).toFixed(3);
+    return 'M0 0H100V100H0Z' + 'M' + ring.map(pt).join('L') + 'Z';
+  }
+
+  /**
+   * 黑边（屏幕形状）。弧度取 max(屏幕弧度, 画面位移)：
+   * 正常情况下黑边只归 --crt-curve 管，跟画面位移没关系 —— 所以认不出 backdrop-filter 的内核
+   * 照样有这块黑边（它们只是画面不弯）。但万一 --crt-warp 被调得比 --crt-curve 还大，
+   * 黑边就必须至少盖住钳位区，否则那圈拉花的像素会露出来。
+   */
+  function buildCrtBezel() {
+    const bezel = $('crtBezelPath');
+    if (!bezel) return;
+    const kb = Math.max(crtCurveAmount(), crtWarpAmount());
+    bezel.setAttribute('d', kb > 0 ? crtBezelPath(kb) : '');
+  }
+
+  function buildCrtWarp() {
+    const map = $('crtWarpMap'), disp = $('crtWarpDisp');
+    if (!map || !disp) return;
+    const k = crtWarpAmount();
+    // 画面位移可以整个关掉（--crt-warp: 0）：那时画面是平的，点击/悬停/框选全都严丝合缝，
+    // 下面那套指针补偿和悬停接管也一起歇工
+    if (!crtWarpOk || !k) {
+      crtWarpK = 0;
+      disp.setAttribute('scale', '0');
+      return;
+    }
+    crtWarpK = k;
+    const w = window.innerWidth, h = window.innerHeight;
+    if (!w || !h) return;
+    const ratio = h / w;
+    const mw = WARP_MAP_PX, mh = Math.max(2, Math.round(WARP_MAP_PX * ratio));
+    const cv = document.createElement('canvas');
+    cv.width = mw; cv.height = mh;                          // 按视口比例画：横屏竖屏各向同性
+    const g = cv.getContext('2d');
+    const img = g.createImageData(mw, mh), px = img.data;
+    const enc = (v) => Math.max(0, Math.min(255, Math.round(127.5 + 255 * v)));
+    const cl = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);        // 采样点不许跑出画面，见上
+    for (let y = 0; y < mh; y++) {
+      const ny = ((y + .5) / mh) * 2 - 1;
+      for (let x = 0; x < mw; x++) {
+        const nx = ((x + .5) / mw) * 2 - 1;                 // 归一化到 ±1：1 就是屏的上下/左右边
+        const f = 1 + k * (nx * nx + ny * ny);
+        const i = (y * mw + x) * 4;
+        px[i] = enc(cl(nx * f) - nx);                       // R：x 位移
+        px[i + 1] = enc((cl(ny * f) - ny) * ratio);         // G：y 位移，乘 h/w 之后横竖才是同一档
+        px[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const href = cv.toDataURL('image/png');
+    map.setAttribute('href', href);
+    map.setAttributeNS(WARP_XLINK, 'xlink:href', href);     // 老一点的内核只认带命名空间的那个
+    disp.setAttribute('scale', w / 2);
+  }
+
+  // 位移图是按视口现算的，窗口一变就得重画。拖窗口时 resize 连发，所以压一个延时 ——
+  // 画图本身只要几毫秒，但跟着每一帧重画就是白烧。
+  let crtWarpTimer = 0;
+  window.addEventListener('resize', () => {
+    if (!crtOn) return;
+    clearTimeout(crtWarpTimer);
+    crtWarpTimer = setTimeout(crtSync, 150);
+  });
+
+  // ---- 指针补偿 ----
+  // 上面那套位移是**画上去的**：版式一个像素没动，浏览器的命中检测也就不会跟着弯。
+  // 于是「看得见的位置」和「点得着的位置」差着一整个位移量 —— 默认强度下画面中间约 5px，
+  // 顶栏右上角那片能到 30px 往上，是真会点错。这里按同一个映射把动作事件倒推回去。
+  //
+  // 只管 click / dblclick / contextmenu 这三类「动作」，不碰 mousedown / pointerdown / mousemove：
+  //   · 悬停高亮走的是 CSS :hover，浏览器按真实指针位置算，这里救不了，高亮仍会偏；
+  //   · 框选跨着一长串 mousemove，只补起点会把矩形画歪，不如不补。
+  // 想彻底没有这层错位，把 --crt-warp 调到 0 即可，那时这里整个不生效。
+  function crtUnwarp(cx, cy) {
+    const w = window.innerWidth, h = window.innerHeight;
+    const nx = (cx / w) * 2 - 1, ny = (cy / h) * 2 - 1;
+    const f = 1 + crtWarpK * (nx * nx + ny * ny);
+    const cl = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
+    return { x: ((cl(nx * f) + 1) * w) / 2, y: ((cl(ny * f) + 1) * h) / 2 };
+  }
+
+  for (const type of ['click', 'dblclick', 'contextmenu']) {
+    window.addEventListener(type, (e) => {
+      // 自己补发的那一发别再兜一圈：派发出来的事件 isTrusted 是 false，正好当标记用
+      if (!e.isTrusted || !crtOn || !crtWarpK) return;
+      const s = crtUnwarp(e.clientX, e.clientY);
+      if (s.x === e.clientX && s.y === e.clientY) return;
+      const el = document.elementFromPoint(s.x, s.y);
+      if (!el || el === e.target) return;
+      // 注意这里**不能**因为「原目标是它的父/子节点」就放行。看着像同一处，其实是反的：
+      // 点卡片看得见的边缘时，补偿后的落点在卡片上、原始落点在卡片缝隙里 —— 原始目标是
+      // #galleryGrid，它恰恰**包含**那张卡片。真放行的话点击就落空了（顶栏按钮同理，
+      // 原始目标是 .appbar）。而「图片 vs 卡片」那种同处一堆的情况，重定向过去也对：
+      // 事件照样冒泡到同一个 handler，只是白跑一趟罢了。
+      // 先补发到补偿后的目标上，再看它接不接（dispatchEvent 返回 false = 被 preventDefault 了）。
+      // 得先派发再决定拦不拦：右键点在空白处时没人接这一发，那就把原生菜单还给用户。
+      const sent = new MouseEvent(type, {
+        bubbles: true, cancelable: true, composed: true,
+        clientX: s.x, clientY: s.y, detail: e.detail,
+        button: e.button, buttons: e.buttons,
+        ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey,
+      });
+      const taken = !el.dispatchEvent(sent);
+      if (type === 'contextmenu' && !taken) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
+  }
+
+  // ---- 悬停高亮补偿 ----
+  // 点击能重定向（上面那段），悬停不能：:hover 是浏览器按**真实**指针位置算的，没有 API 能改。
+  // 所以唯一的办法是干脆不用 :hover —— 把样式表里带 :hover 的规则镜像一份成 .crt-hover，
+  // 把原规则废掉（接上 :not(*)，永远不匹配），再按补偿后的位置自己挂这个类。
+  //
+  // 这站的 :hover 选择器形态很干净（`.x:hover` / `.x:hover .y` / 逗号并列 / 皮肤前缀），
+  // 没有 :is() :not() :has()，也没有藏在 @media 里，所以字符串替换是安全的；真遇到复杂的
+  // 就整段安静退回去（高亮仍偏，但别的照常）—— 全部包在 try 里就是为这个。
+  //
+  // 挂类要连祖先一起挂：`.folder-tile:hover .folder-icon` 这种，命中的可能是里面那个图标。
+  const CRT_HOVER = 'crt-hover';
+  let crtHoverMirrors = null;   // [{ rule, orig, mirror, sheet }]；null = 没接管
+  let crtHoverEl = null;        // 当前命中的元素（.crt-hover 挂在它和它整条祖先链上）
+  let crtHoverPt = null;
+  let crtHoverRaf = 0;
+  let crtCursorRaw = null;      // 光标盖在谁身上（原始命中的那个），以及盖的依据
+  let crtCursorFor = null;
+
+  function setCrtHover(el) {
+    if (el === crtHoverEl) return;
+    for (let n = crtHoverEl; n; n = n.parentElement) n.classList.remove(CRT_HOVER);
+    crtHoverEl = el;
+    for (let n = el; n; n = n.parentElement) n.classList.add(CRT_HOVER);
+  }
+
+  // 光标形状：浏览器是按**真实**指针位置下那个元素的 cursor 画的，跟画面差着一个位移量 ——
+  // 最明显的是光标进卡片时提前二三十像素变成放大镜。所以把补偿后元素的 cursor 内联盖到
+  // 「原始命中」的那个元素上（内联 !important 压得住作者样式）。
+  // 别图省事写成一条 `* { cursor: … !important }`：那样再读 getComputedStyle 读回来的
+  // 就是自己刚盖上去的值，等于自己吃自己 —— 光标会永远停在 auto（第一版就是这么翻的车）。
+  function setCrtCursor(rawEl, srcEl) {
+    if (rawEl === crtCursorRaw && srcEl === crtCursorFor) return;
+    if (crtCursorRaw) crtCursorRaw.style.removeProperty('cursor');
+    crtCursorRaw = null;
+    crtCursorFor = srcEl;
+    if (rawEl && srcEl && rawEl !== srcEl) {   // 两者一致时原生那套本来就是对的，不用管
+      crtCursorRaw = rawEl;
+      rawEl.style.setProperty('cursor', getComputedStyle(srcEl).cursor, 'important');
+    }
+  }
+
+  function crtHoverUndo(list) {
+    for (const m of list) {
+      try {
+        m.rule.selectorText = m.orig;
+        // deleteRule 在**父级**上（CSSStyleSheet / CSSMediaRule），CSSRuleList 自己只有 item/length，
+        // 写成 list.deleteRule(...) 会直接 "not a function" —— 而且很容易被 try 吞掉，一声不响地漏删
+        const parent = m.mirror.parentRule || m.sheet;
+        const idx = Array.prototype.indexOf.call(parent.cssRules, m.mirror);
+        if (idx >= 0) parent.deleteRule(idx);
+      } catch (e) { /* 还原失败也只能算了，别把别的带崩 */ }
+    }
+  }
+
+  let crtHoverOn = false;   // 接管状态单独记：别拿 crtHoverMirrors 兼当标志位，
+                            // 万一中途抛异常它会停在半路，下一轮就会重复插一遍
+  function crtHoverPatch(on) {
+    if (crtHoverOn === on) return;
+    crtHoverOn = on;
+    if (!on) {
+      crtHoverUndo(crtHoverMirrors || []);
+      crtHoverMirrors = null;
+      setCrtHover(null);
+      setCrtCursor(null, null);
+      document.documentElement.removeAttribute('data-crt-hover');
+      return;
+    }
+    const found = [];
+    for (const sheet of document.styleSheets) {
+      let rules;
+      try { rules = sheet.cssRules; } catch (e) { continue; }   // 跨域的（字体表）读不到，跳过
+      const walk = (parent, list) => {
+        for (let i = list.length - 1; i >= 0; i--) {
+          const r = list[i];
+          // 分组规则（@media / @supports）没有 selectorText，往里钻；其余一律当样式规则。
+          // 不能反过来用 `if (r.cssRules)` 判断分组 —— 自从有了 CSS 嵌套，CSSStyleRule 也带
+          // cssRules（没嵌套时是个空列表，但**空列表也是真值**），那样会把每条样式规则都跳过。
+          if (!r.selectorText) { if (r.cssRules) walk(r, r.cssRules); continue; }
+          if (r.selectorText.indexOf(':hover') < 0) continue;
+          const parts = r.selectorText.split(',').map((s) => s.trim())
+            .filter((s) => s.indexOf(':hover') >= 0);
+          if (!parts.length) continue;
+          const orig = r.selectorText;
+          const mirror = parts.map((s) => s.replace(/:hover/g, '.' + CRT_HOVER)).join(',');
+          // 先插镜像、插成功了再废原规则 —— 反过来的话，一插失败就留下一条「废了但没替补」的规则
+          try { parent.insertRule(mirror + '{' + r.style.cssText + '}', i + 1); } catch (e) { continue; }
+          r.selectorText = orig.replace(/:hover/g, ':hover:not(*)');   // 原规则废掉
+          found.push({ rule: r, orig: orig, mirror: list[i + 1], sheet: sheet });
+        }
+      };
+      walk(sheet, rules);
+    }
+    crtHoverMirrors = found;
+    // 这个标记没有配套样式，纯粹是给「接管中」留个能看见的状态（devtools 里一眼能认）
+    document.documentElement.setAttribute('data-crt-hover', '');
+  }
+
+  function crtHoverSync() {
+    crtHoverRaf = 0;
+    if (!crtHoverPt || !crtOn || !crtWarpK) { setCrtHover(null); setCrtCursor(null, null); return; }
+    const p = crtHoverPt;
+    const s = crtUnwarp(p.x, p.y);
+    const el = document.elementFromPoint(s.x, s.y);
+    setCrtHover(el);
+    setCrtCursor(document.elementFromPoint(p.x, p.y), el);
+  }
+
+  // 每一帧最多算一次：pointermove 的密度远高于重绘
+  window.addEventListener('pointermove', (e) => {
+    if (!e.isTrusted) return;
+    crtHoverPt = { x: e.clientX, y: e.clientY };
+    if (!crtHoverRaf) crtHoverRaf = requestAnimationFrame(crtHoverSync);
+  }, true);
+  // 指针离开窗口 / 切走标签页：别让高亮黏在最后一个元素上
+  const crtHoverDrop = () => { crtHoverPt = null; setCrtHover(null); setCrtCursor(null, null); };
+  document.addEventListener('mouseleave', crtHoverDrop);
+  window.addEventListener('blur', crtHoverDrop);
+
+  // 开关、两个变量、视口尺寸 —— 任何一样变了都从这里过一遍，免得几处各写各的
+  function crtSync() {
+    buildCrtBezel();
+    buildCrtWarp();
+    crtHoverPatch(crtOn && crtWarpK > 0);   // 画面没位移就不必接管 :hover，原生那套本来就是对
   }
 
   themeMenu.appendChild(document.createElement('div')).className = 'ctx-sep';

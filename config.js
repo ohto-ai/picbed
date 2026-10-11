@@ -24,6 +24,9 @@ window.PICBED_CONFIG = {
   //   pda             PDA / Windows Mobile
   skin: 'lcd-olive',
 
-  // CRT 滤镜：叠在任意皮肤之上的一层扫描线 + 荫罩 + 暗角（访客同样可在「风格」里开关）
+  // CRT 滤镜：叠在任意皮肤之上的一层扫描线 + 荫罩 + 暗角 + 镜头畸变
+  // （访客同样可在「风格」里开关。畸变挂的是 backdrop-filter，只有 Chromium 系会弯，
+  //   Safari / Firefox 拿到的是不弯的平面扫描线 + 一块屏幕形状的黑边。
+  //   因位移产生的点按/悬停偏差主脚本做了补偿，只有框选拖拽还偏 —— 详见 README）
   crt: false,
 };
