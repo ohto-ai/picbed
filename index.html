@@ -176,7 +176,7 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .brand p { margin: 0; font-size: 12px; color: var(--muted); }
 .appbar-spacer { flex: 1; }
 
-/* 视图切换（公开 / 我的相册） */
+/* 视图切换（公开画廊 / 我的图库） */
 .tabs { display: flex; gap: 3px; background: var(--glass-strong); border: 1px solid var(--border); border-radius: 11px; padding: 3px; }
 .tabs button {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1472,7 +1472,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     <span class="appbar-spacer"></span>
     <nav id="viewTabs" class="tabs">
       <button id="tabPublic"><svg class="ic"><use href="#i-globe"/></svg>公开画廊</button>
-      <button id="tabAdmin"><svg class="ic"><use href="#i-lock"/></svg>我的相册</button>
+      <button id="tabAdmin"><svg class="ic"><use href="#i-lock"/></svg>我的图库</button>
     </nav>
     <!-- 访客可见：指向源码仓库 -->
     <a id="repoLink" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>
@@ -2015,7 +2015,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // targetAlbum 不传就传进当前所在的相册
   function addFiles(files, targetAlbum) {
     if (!needWorker()) return;
-    const base = targetAlbum === undefined || targetAlbum === null ? galleryAlbum : targetAlbum;
+    const base = targetAlbum === undefined || targetAlbum === null ? curAlbum : targetAlbum;
     let added = 0;
     let skippedNonImage = 0;
     let skippedTooBig = 0;
@@ -2404,7 +2404,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // ---------- 上传状态面板（右下悬浮按钮） ----------
   // 视图模式：'admin' = 管理视图，'public' = 游客公开视图（见 switchView）
   // 本机已保存密码则直接进管理视图，否则默认展示公开画廊
-  // 记住上次看的视图：刷新后回到原处，不再每次都被拽进「我的相册」。
+  // 记住上次看的视图：刷新后回到原处，不再每次都被拽进「我的图库」。
   // 首次访问（没记录）时，配了密码就直接进管理视图 —— 保持原来的习惯。
   const VIEW_KEY = 'picbed_view';
   let view = (() => {
@@ -2470,7 +2470,14 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   let galleryPage = 1;   // 页码分页（接口按 page/pageSize 取）
   let galleryTotal = 0;
   let galleryMaxPage = 1;
-  let galleryAlbum = ''; // 当前相册名（'' = 根）。相册是数据库里的一列，不再是键前缀
+  // 当前目录（'' = 根）。相册是数据库里的一列，所以它只是一个字符串。
+  //
+  // **两个视图共用这一个「在哪儿」**，而且它同时就是地址栏里的 ?album=：在「我的图库」里
+  // 翻到哪个相册，切到「公开画廊」就还是那个相册（反过来也一样），刷新、前进后退同理。
+  // 从前是两个变量各记各的（galleryAlbum / publicAlbum），切标签就把人甩回根目录 ——
+  // 而两边的目录树本来就是同一棵，只是「看得见多少」的过滤不同（见 loadGallery 与
+  // loadPublicGallery），没理由记两份。进相册一律走 goAlbum，别直接改它。
+  let curAlbum = new URLSearchParams(location.search).get('album') || '';
   // 相册内容的世代号：每次发起加载都 ++（管理视图与公开画廊共用同一个 #galleryGrid，
   // 所以也共用一个世代号）。await 返回后只有「最新一次」请求有权往网格里写内容与分页
   // 状态 —— 否则「打开子相册，还没加载完就退回父目录」时，子相册的响应会晚于父目录
@@ -2481,10 +2488,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   const selectedKeys = new Set();
   let anchorFig = null; // Shift 连选的锚点卡片
 
-  // 公开画廊（访客视图）：同样按相册名浏览，另外带一个分级档位
-  // 相册进 URL：这样「某个相册」本身就可以被分享出去（见 albumShareUrl）。
-  // 分级档位同理，从 ?rating= 读。
-  let publicAlbum = new URLSearchParams(location.search).get('album') || '';
+  // 公开画廊（访客视图）：和「我的图库」逛同一棵目录树（当前目录见 curAlbum），
+  // 只是取回来的内容按分级档位过滤过 —— 档位同样从 URL 来（?rating=，见 publicRatingParam）。
   let publicLoaded = 0;
   let publicPage = 1;
   let publicTotal = 0;
@@ -2498,15 +2503,27 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   const COVERED_RATINGS = ['R15', 'R18'];
   const publicRevealAll = () => new URLSearchParams(location.search).get('reveal') === '1';
 
-  /** 把当前相册写回地址栏（replace=true 时不新增一条历史记录） */
+  /** 把当前目录写回地址栏（replace=true 时不新增一条历史记录） */
   function syncAlbumUrl(replace) {
     const q = new URLSearchParams(location.search);
-    if (publicAlbum) q.set('album', publicAlbum); else q.delete('album');
+    if (curAlbum) q.set('album', curAlbum); else q.delete('album');
     const url = location.pathname + (q.toString() ? '?' + q : '');
     // ⚠️ 必须写 window.history：本文件里有个同名局部变量 history（上传历史数组），
     // 直接把浏览器那个 history 遮住了 —— 不写全名会报 "history.pushState is not a function"
     if (replace) window.history.replaceState(null, '', url);
     else window.history.pushState(null, '', url);
+  }
+
+  /**
+   * 进入某个相册：两个视图共用这一条路 —— 改「当前目录」、写回地址栏、让当前视图重新加载。
+   *
+   * replace=true 用在**不是用户走进去**的那些时候：相册被改名 / 移动 / 删除后跟着挪过去。
+   * 那种一步不该占一条历史记录 —— 否则按后退会回到一个已经不存在的路径，看到空目录。
+   */
+  function goAlbum(album, replace) {
+    curAlbum = album;
+    syncAlbumUrl(!!replace);
+    if (view === 'public') loadPublicGallery(true); else loadGallery(true);
   }
 
   /** 某个相册的分享链接：指向公开画廊的那个相册，并带上当前的分级档位 */
@@ -2586,7 +2603,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const album = sanitizeAlbum(text.replace(/^\/+/, ''));
     if (album === null) return null; // 含保留段
     if (!album) return '';
-    return abs ? album : albumJoin(galleryAlbum, album);
+    return abs ? album : albumJoin(curAlbum, album);
   }
 
   /** target 是否落在 base 子树里（含自身）。按路径段比较 —— 不能用 startsWith，否则 a 会吃掉 ab */
@@ -2968,7 +2985,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   async function loadGallery(reset) {
     if (!needWorker()) return; // 提前返回前不作废在途请求：这条路不清网格，让它照常渲染
     const seq = ++galleryReqSeq; // 本次加载取得所有权，所有在途请求就此作废
-    const album = galleryAlbum; // 快照：await 期间用户可能已经切到别的相册
+    const album = curAlbum; // 快照：await 期间用户可能已经切到别的相册
     const cached = reset ? listCache.get(listKey('admin', album)) : null;
     if (reset) {
       galleryPage = 1;
@@ -3047,7 +3064,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   async function loadPublicGallery(reset) {
     const seq = ++galleryReqSeq; // 与 loadGallery 共用世代号：网格是同一个
-    const cached = reset ? listCache.get(listKey('public', publicAlbum)) : null;
+    const cached = reset ? listCache.get(listKey('public', curAlbum)) : null;
     if (reset) {
       publicPage = 1;
       publicLoaded = 0;
@@ -3078,12 +3095,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const btn = $('loadMore');
     loadMoreState(true);
     try {
-      const data = await fetchList('public', publicAlbum, publicPage);
+      const data = await fetchList('public', curAlbum, publicPage);
       if (seq !== galleryReqSeq) return; // 已经切走：这份结果作废，一个节点都不许写进网格
       // 面包屑已在上面提前渲染过；await 期间一旦切走这里就已返回，无需再渲染一次
       const files = data.images || [];
       if (reset) {
-        cacheList('public', publicAlbum, data);
+        cacheList('public', curAlbum, data);
         if (!cached || cached.sig !== listSig(files) || cached.total !== (data.total || 0)) {
           $('galleryGrid').textContent = '';
           dlCancelAll();
@@ -3104,9 +3121,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         : '这里还没有可看的图片';
       btn.hidden = publicPage >= publicMaxPage;
       if (reset && publicTotal === 0 && !(data.folders || []).length) {
-        publicGridHint(publicAlbum
+        publicGridHint(curAlbum
           ? '这个相册里还没有可看的图片。'
-          : '还没有公开的图片。管理员可以在「我的相册」里给图片设置分级。');
+          : '还没有公开的图片。管理员可以在「我的图库」里给图片设置分级。');
       }
     } catch (e) {
       console.error('[picbed] 公开画廊加载失败:', e.message || e);
@@ -3131,7 +3148,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const cap = document.createElement('figcaption');
     cap.textContent = n ? `${name}（${n}）` : name;
     fig.append(iconEl, cap);
-    const open = () => { publicAlbum = album; syncAlbumUrl(false); loadPublicGallery(true); };
+    const open = () => goAlbum(album);
     fig.onclick = open;
     // 悬停即预取：停一下就把那一页拉回来，点进去多半正好命中（见 prefetchAlbum）
     fig.addEventListener('mouseenter', () => prefetchAlbum('public', album));
@@ -3328,7 +3345,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       // 用路径段比较而不是 startsWith —— 否则相册 a 会被当成 ab 的父级。
       return !inSubtree(targetAlbum, dragPayload.album);
     }
-    return targetAlbum !== galleryAlbum; // 图片已在当前相册，拖回来是空操作
+    return targetAlbum !== curAlbum; // 图片已在当前相册，拖回来是空操作
   }
 
   function makeDropTarget(el, getTargetPrefix, allowUpload) {
@@ -3409,7 +3426,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
    */
   async function moveImagesTo(keys, targetAlbum) {
     if (!keys || !keys.length) return;
-    if (targetAlbum === galleryAlbum) return toast('图片已经在该相册', true);
+    if (targetAlbum === curAlbum) return toast('图片已经在该相册', true);
     const rows = keys.map((k) => itemsByKey.get(k)).filter(Boolean);
     if (!rows.length) return toast('找不到这些图片的记录', true);
     try {
@@ -3431,8 +3448,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       invalidateAlbumTree();
       invalidateListCache(); // 相册名变了，缓存里那些条目的 album 也旧了
       toast(`已移到「${to || '根目录'}」，${r.changed} 张图受影响（直链不变）`);
-      // 当前正待在被移动的相册里时，跟着导航过去
-      if (inSubtree(galleryAlbum, from)) galleryAlbum = to + galleryAlbum.slice(from.length);
+      // 当前正待在被移动的相册里时，跟着导航过去。地址栏也要跟着改（replace：这不是用户
+      // 走进去的一步，按后退回到旧路径只会看到一个已经不存在的相册）
+      if (inSubtree(curAlbum, from)) { curAlbum = to + curAlbum.slice(from.length); syncAlbumUrl(true); }
       loadGallery(true);
     } catch (e) {
       toast('移动失败：' + errMsg(e), true);
@@ -3443,23 +3461,13 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const el = $('galleryPath');
     el.textContent = '';
     const isPublic = view === 'public';
-    const current = isPublic ? publicAlbum : galleryAlbum; // 相册名，'' = 根
-    const go = (album) => {
-      if (isPublic) {
-        publicAlbum = album;
-        syncAlbumUrl(false); // 面包屑导航也写回地址栏，随时可复制当前路径
-        loadPublicGallery(true);
-      } else {
-        galleryAlbum = album;
-        loadGallery(true);
-      }
-    };
+    const current = curAlbum; // 相册名，'' = 根
     const crumb = (label, album, isCurrent, iconName) => {
       const b = document.createElement('button');
       b.className = 'crumb' + (isCurrent ? ' current' : '');
       if (iconName) b.appendChild(icon(iconName));
       b.appendChild(document.createTextNode(label));
-      if (!isCurrent) b.onclick = () => go(album);
+      if (!isCurrent) b.onclick = () => goAlbum(album); // 面包屑导航也写回地址栏，随时可复制当前路径
       if (!isPublic) makeDropTarget(b, () => album); // 可把图片/相册拖到上级相册
       el.appendChild(b);
     };
@@ -3469,7 +3477,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       s.textContent = '/';
       el.appendChild(s);
     };
-    crumb(isPublic ? '公开画廊' : '全部', '', current === '', isPublic ? 'globe' : 'folder');
+    // 根那一格用标签页同款的名字：公开画廊 / 我的图库（两处叫法得一致，否则像进错了地方）
+    crumb(isPublic ? '公开画廊' : '我的图库', '', current === '', isPublic ? 'globe' : 'folder');
     if (current) {
       let acc = '';
       const parts = current.split('/').filter(Boolean);
@@ -3546,8 +3555,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       const r = await api('/api/albums?album=' + encodeURIComponent(album), { method: 'DELETE' });
       invalidateAlbumTree();
       toast(`已删除相册（${r.deleted} 张图）`);
-      // 删的正是当前所在相册（或它的子相册）时就退回父级
-      if (inSubtree(galleryAlbum, album)) galleryAlbum = albumParent(album);
+      // 删的正是当前所在相册（或它的子相册）时就退回父级（地址栏同理，replace）
+      if (inSubtree(curAlbum, album)) { curAlbum = albumParent(album); syncAlbumUrl(true); }
       loadGallery(true);
     } catch (err) {
       toast('删除失败：' + errMsg(err), true);
@@ -3580,7 +3589,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     del.onclick = (e) => { e.stopPropagation(); deleteAlbumDialog(album, name); };
     actions.append(rename, move, del);
     fig.append(iconEl, actions, cap);
-    fig.onclick = () => { galleryAlbum = album; loadGallery(true); };
+    fig.onclick = () => goAlbum(album);
     // 悬停即预取：停一下就把那一页拉回来，点进去多半正好命中（见 prefetchAlbum）
     fig.addEventListener('mouseenter', () => prefetchAlbum('admin', album));
     // 右键菜单：与悬浮按钮相同的操作
@@ -3588,7 +3597,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       e.preventDefault();
       e.stopPropagation();
       showCtxMenu(e.clientX, e.clientY, [
-        { icon: 'folder', label: '打开相册', onClick: () => { galleryAlbum = album; loadGallery(true); } },
+        { icon: 'folder', label: '打开相册', onClick: () => goAlbum(album) },
         '-',
         // 分享的是「公开画廊里的这个相册」—— 管理员自己看的是全部，访客只看得到可陈列的那些
         { icon: 'link', label: '复制相册链接（给访客）', onClick: () => copyText(albumShareUrl(album)) },
@@ -3630,14 +3639,13 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       help: '相册在你往里面传第一张图时就创建好了。这里先带你进入该相册。',
       confirmText: '进入',
       tree: true,
-      treeReveal: galleryAlbum, // 同样展开到当前层级：多半是要在这里面再开一层
+      treeReveal: curAlbum, // 同样展开到当前层级：多半是要在这里面再开一层
     });
     if (raw === null || !String(raw).trim()) return;
     const album = parseTargetAlbum(raw);
     if (album === null) return toast('_picbed 是保留目录名，不能使用', true);
     if (!album) return toast('请输入相册名', true);
-    galleryAlbum = album;
-    loadGallery(true);
+    goAlbum(album);
     toast(`已进入「${album}」——往里传图即可创建这个相册`);
   }
 
@@ -3769,7 +3777,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       help: '可用 / 指定多级；以 / 开头表示从图床根目录开始。树里已经展开到你当前所在的相册，点一下即可。',
       confirmText: '移动',
       tree: true,
-      treeReveal: galleryAlbum, // 展开到当前层级：附近就是最常去的目标，不必一层层点开
+      treeReveal: curAlbum, // 展开到当前层级：附近就是最常去的目标，不必一层层点开
       treeRoot: true,
       treeHint: '点相册 = 移进它；已展开并标出你当前所在的层级',
     });
@@ -4245,8 +4253,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     // 没有缩略图的图（SVG/ICO、生成失败、还没补全的旧图）直接用原图。
     const thumbUrlFull = it.thumb_url || null;
     const useThumb = !!thumbUrlFull;
-    // 敏感内容遮罩：公开视图里 R15/R18 默认盖一层（底下一张重糊的缩略图），点一下才揭开。
-    const covered = isPublic && !publicRevealAll() && COVERED_RATINGS.includes(it.rating);
+
     const img = document.createElement('img');
     img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -5167,8 +5174,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   };
   // 上传目标提示：悬停在子相册上时显示该相册名
   function updateDropLabel() {
-    const album = uploadTargetPrefix === null || uploadTargetPrefix === undefined ? galleryAlbum : uploadTargetPrefix;
-    const name = album ? album.split('/').pop() : '全部图片';
+    const album = uploadTargetPrefix === null || uploadTargetPrefix === undefined ? curAlbum : uploadTargetPrefix;
+    // 根目录那一格用标签页同款的名字（我的图库），和面包屑保持一致
+    const name = album ? album.split('/').pop() : '我的图库';
     $('dropTargetLabel').textContent = `松开鼠标，上传到「${name}」`;
   }
   let dragDepth = 0;
@@ -5329,11 +5337,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     link.hidden = false;
   }
 
-  // 浏览器前进/后退：相册现在是 URL 的一部分，所以要跟着走
+  // 浏览器前进/后退：相册是 URL 的一部分，两个视图都跟着走（当前在哪个视图不影响）
   window.addEventListener('popstate', () => {
-    if (view !== 'public') return; // 管理视图的相册不入地址栏，交给它自己
-    publicAlbum = new URLSearchParams(location.search).get('album') || '';
-    loadPublicGallery(true);
+    curAlbum = new URLSearchParams(location.search).get('album') || '';
+    if (view === 'public') loadPublicGallery(true); else loadGallery(true);
   });
 
   // 皮肤已经由 <head> 那段脚本贴好了，这里只把菜单上的勾选同步过来
