@@ -383,7 +383,13 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 }
 .grid figure:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
 .grid figure.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
-.grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--border); }
+/* 照片滤镜：皮肤想把网格里的照片滤成什么样（LCD 就靠它把照片滤成屏幕色），值放进 --photo-filter。
+   网格照片的 filter 只在**这一条**和下面遮罩那条里写 —— 皮肤别自己写
+   `html[data-skin=x] .grid img { filter: … }`：那种规则在文件更靠后，特异性又和遮罩那条一模一样
+   （都是 2 个类/属性 + 2 个类型），会把遮罩的 blur 整个顶掉。症状是「敏感内容遮罩形同虚设，
+   图看得清清楚楚」，而且只在那一套皮肤下出现，很难往 CSS 上想（踩过）。
+   没设这个变量的皮肤：整条声明在计算值阶段失效，filter 回到初始值 none，等于没写。 */
+.grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--border); filter: var(--photo-filter); }
 .grid figcaption { display: flex; align-items: center; font-size: 12px; color: var(--muted); padding: 6px 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sel-check {
   position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%;
@@ -406,10 +412,13 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 body.marqueeing { user-select: none; -webkit-user-select: none; }
 body.marqueeing .grid figure { cursor: default; transform: none; }
 /* 敏感内容遮罩：R15/R18 默认糊住，点一下才显示（地址加 ?reveal=1 可整体放开）。
-   遮罩底下的图**只下载缩略图**（512px）：糊得重到只能看出大致轮廓，点开才去取原图，
-   所以不存在「先把原图下下来再糊上」——悬停预取也特意跳过了被遮罩的卡片。 */
+   遮罩底下的图**只下载缩略图**（512px）：糊得重到只能看出大致轮廓，所以不存在「先把原图
+   下下来再糊上」——悬停预取也特意跳过了被遮罩的卡片。揭开只是把这层糊去掉，仍然不下原图：
+   要点进灯箱才取（见 revealCover）。 */
 .grid figure.is-covered { cursor: pointer; background: var(--panel-2); }
-.grid figure.is-covered img { filter: blur(38px); transform: scale(1.2); }
+/* 空回退 var(--photo-filter,) 是有意的：皮肤没给滤镜时，替换完这里正好就是 blur(38px)。
+   （别写成 none blur(38px)：none 不准和别的函数并列，整条会失效，遮罩就又不糊了。） */
+.grid figure.is-covered img { filter: var(--photo-filter,) blur(38px); transform: scale(1.2); }
 .grid figure .cover-hint {
   position: absolute; inset: 0; z-index: 3;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
@@ -872,6 +881,9 @@ html[data-skin^="lcd"] {
   --lcd-dim: #306230;
   /* 照片滤镜。亮版是「滤成灰绿点阵」；反色版要换成先把照片翻成负片再染绿 */
   --lcd-photo-filter: grayscale(1) brightness(1.06) contrast(1.35) sepia(1) hue-rotate(35deg) saturate(2.4);
+  /* 交给基础样式用：网格里的照片由它上色，遮罩的糊也叠在它之上（见 .grid img 那两条）。
+     变体只改 --lcd-photo-filter，这个也跟着变。 */
+  --photo-filter: var(--lcd-photo-filter);
   /* 网点层。亮版用深色网点乘上去压暗；暗版要反过来用亮网点 screen */
   --lcd-dot: rgba(15, 56, 15, .4);
   --lcd-dot-blend: multiply;
@@ -924,8 +936,9 @@ html[data-skin^="lcd"] .gallery-path .crumb.current { text-decoration: none; bac
 html[data-skin^="lcd"] .spin { border: 3px solid rgba(var(--lcd-ink-rgb), .3); border-top-color: var(--lcd-ink); }
 /* 缩略图统一滤成屏幕色 —— 相册看起来就像在老手机屏上翻。
    灯箱的大图**故意不滤**：网格是「屏幕」的一部分，可以染色；点开就是要看这张照片
-   真实的样子，再糊一层绿就本末倒置了。相框式的描边照旧留着。 */
-html[data-skin^="lcd"] .grid img,
+   真实的样子，再糊一层绿就本末倒置了。相框式的描边照旧留着。
+   网格里的照片走基础样式的 .grid img（吃的就是上面那个 --photo-filter），这里只管
+   上传队列的缩略图与结果预览 —— 那几个不在 .grid 里，也不会被遮罩盖住。 */
 html[data-skin^="lcd"] .result img,
 html[data-skin^="lcd"] .q-thumb {
   filter: var(--lcd-photo-filter);
