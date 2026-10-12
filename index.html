@@ -490,6 +490,10 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 }
 .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .field .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+/* 设置里的复选框（全站唯一一个原生控件）：accent-color 让它跟着皮肤的主色走，
+   九套皮肤不必各写一条。.field input 那条是给文本框的（width:100% + padding），这里还回去 */
+.field .check { display: flex; align-items: center; gap: 8px; margin-top: 9px; font-size: 13px; color: var(--text); cursor: pointer; }
+.field .check input { width: auto; margin: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .btn.danger-solid { background: var(--danger); border-color: transparent; color: #fff; }
 .btn.danger-solid:hover { filter: brightness(1.1); }
@@ -1603,6 +1607,24 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         <option value="html">HTML</option>
       </select>
     </label>
+    <!-- 「隐藏层级」只在「我的图库」里露面（openSettings 按视图 hidden）：它是站主自己防走光的
+         开关，访客用不上，摆在游客的设置面板里只会让人猜「隐藏」的是什么。
+         这块用 <div class="field"> 而不是像别的字段那样用 <label class="field"> 包住整段 ——
+         里面那个复选框自己就是个 label，label 不能套 label -->
+    <div class="field" id="setAdminMaskField" hidden>
+      <label for="setAdminMask">隐藏层级</label>
+      <select id="setAdminMask">
+        <option value="">关闭</option>
+        <option value="R12">R12</option>
+        <option value="R15">R15</option>
+        <option value="R18">R18</option>
+      </select>
+      <label class="check" for="setAdminMaskUnspecified">
+        <input type="checkbox" id="setAdminMaskUnspecified" checked>
+        未分类的也一并糊住
+      </label>
+      <span class="hint">只作用于「我的图库」：选中的档位及以上默认糊住，点一下才显示 —— 投屏、有人站在背后时用。</span>
+    </div>
     <label class="field">故障诊断
       <button id="probeBtn" class="btn small" type="button" style="margin-top:6px;">测试后端连接</button>
       <!-- 用 --panel-2 而不是 --bg：--bg 是页面画布色，PDA 皮肤下那是桌面青，
@@ -2502,6 +2524,28 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // 注意它和 ?rating= 是两件事：rating 决定「列不列出来」，reveal 决定「糊不糊」。
   const COVERED_RATINGS = ['R15', 'R18'];
   const publicRevealAll = () => new URLSearchParams(location.search).get('reveal') === '1';
+  // 「我的图库」里也有一套遮罩（设置面板的「隐藏层级」）：自己看的时候把某些档位也糊住 ——
+  // 投屏、有人站在背后时，整理相册不至于顺手就把不该露的图亮出来。两边共用同一套遮罩与揭开
+  // 逻辑（is-covered / revealCover），所以糊着的卡片同样只下缩略图。
+  // 默认 R15 起糊，外加「未分类的也一并糊住」—— 它还没被过过目，跟公开画廊「未分类不进相册」
+  // 是同一种保守；那一条在设置里可以单独关掉（关不掉的话，刚传完还没分级的图就全糊着了）。
+  const ADMIN_MASK_KEY = 'picbed_admin_mask';
+  const ADMIN_MASK_UNSPEC_KEY = 'picbed_admin_mask_unspec';
+  const RATING_RANK = { G: 0, R12: 1, R15: 2, R18: 3 };
+  let adminMask = 'R15';       // '' = 关闭；否则是「从这个档位起糊住」（R12 / R15 / R18）
+  let adminMaskUnspec = true;  // 未分类的要不要一起糊
+  try {
+    // 判 null 而不是判真假：「关闭」存下来的是空串，那也是个有效选择，不能被默认值顶回去
+    const savedMask = localStorage.getItem(ADMIN_MASK_KEY);
+    if (savedMask !== null) adminMask = savedMask;
+    const savedUnspec = localStorage.getItem(ADMIN_MASK_UNSPEC_KEY);
+    if (savedUnspec !== null) adminMaskUnspec = savedUnspec === '1';
+  } catch (e) { /* 隐私模式读不到就用默认 */ }
+  const adminMasked = (rating) => {
+    if (!adminMask) return false; // 「关闭」= 管理页里一张都不糊，那个复选框这时也不生效（界面上会灰掉）
+    if (rating === 'unspecified') return adminMaskUnspec;
+    return (RATING_RANK[rating] || 0) >= (RATING_RANK[adminMask] || 0);
+  };
 
   /** 把当前目录写回地址栏（replace=true 时不新增一条历史记录） */
   function syncAlbumUrl(replace) {
@@ -4253,7 +4297,11 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     // 没有缩略图的图（SVG/ICO、生成失败、还没补全的旧图）直接用原图。
     const thumbUrlFull = it.thumb_url || null;
     const useThumb = !!thumbUrlFull;
-
+    // 遮罩：公开画廊里 R15/R18 默认盖一层（底下一张重糊的缩略图）点一下才揭开；
+    // 「我的图库」里按设置面板那个「隐藏层级」盖（默认关闭）。
+    const covered = isPublic
+      ? (!publicRevealAll() && COVERED_RATINGS.includes(it.rating))
+      : adminMasked(it.rating);
     const img = document.createElement('img');
     img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
     img.draggable = false; // 让外层 figure 接管拖拽，避免浏览器拖出图片 URL
@@ -4370,6 +4418,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     });
     // 多选：单击选中、Ctrl/Cmd+单击反选、Shift+单击连选
     fig.onclick = (e) => {
+      // 糊住的先揭开（第一下只是「同意查看」，不下原图）。多选模式下不揭：那一档点的是选择，
+      // 批量整理不该顺手把敏感图亮出来 —— 卡片照旧糊着，要看得单独点它一下。
+      if (!selectMode && fig.classList.contains('is-covered')) return revealCover(fig, it, img, thumbUrlFull);
       if (!selectMode) { openLightbox(it); return; }
       if (e.shiftKey && anchorFig && anchorFig !== fig) {
         selectRange(anchorFig, fig, !!(e.ctrlKey || e.metaKey));
@@ -4689,7 +4740,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     $('setWorker').value = cfg.api;
     $('setPassword').value = cfg.password;
     $('setFormat').value = cfg.format;
+    // 隐藏层级是「我的图库」的防走光开关，只在管理视图里露面（见那段 HTML 上的注释）
+    $('setAdminMaskField').hidden = view !== 'admin';
+    $('setAdminMask').value = adminMask;
+    $('setAdminMaskUnspecified').checked = adminMaskUnspec;
+    syncAdminMaskInputs();
     $('settingsDialog').hidden = false;
+  }
+
+  /** 「隐藏层级 = 关闭」时下面那个复选框不生效，灰掉 —— 免得让人以为它还在起作用 */
+  function syncAdminMaskInputs() {
+    $('setAdminMaskUnspecified').disabled = !$('setAdminMask').value;
   }
 
   function closeSettings() { $('settingsDialog').hidden = true; }
@@ -4698,6 +4759,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     cfg.api = $('setWorker').value.trim().replace(/\/+$/, '');
     cfg.password = $('setPassword').value;
     cfg.format = $('setFormat').value;
+    adminMask = $('setAdminMask').value;
+    adminMaskUnspec = $('setAdminMaskUnspecified').checked;
+    try {
+      localStorage.setItem(ADMIN_MASK_KEY, adminMask);
+      localStorage.setItem(ADMIN_MASK_UNSPEC_KEY, adminMaskUnspec ? '1' : '0');
+    } catch (e) { /* 存不下就算了，不影响使用 */ }
     invalidateAlbumTree();
     dlOk = null; // 换了后端就重新判一次能不能自取（CORS 是域名级的，新域名可能是另一回事）
     saveSettings();
@@ -5240,6 +5307,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   };
   $('saveSettings').onclick = applySettings;
   $('closeSettings').onclick = closeSettings;
+  $('setAdminMask').addEventListener('change', syncAdminMaskInputs); // 选了「关闭」就把那个复选框灰掉
   $('settingsDialog').addEventListener('click', (e) => { if (e.target === $('settingsDialog')) closeSettings(); });
   $('refreshGallery').onclick = () => loadGallery(true);
   $('backfillThumbs').onclick = backfillThumbs;
