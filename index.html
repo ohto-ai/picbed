@@ -4183,20 +4183,33 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     if (dlIO) dlIO.disconnect();
   }
 
-  /** 揭开敏感内容遮罩：移掉覆盖层，**这之后才去取原图**（此前只下过缩略图） */
-  function revealCover(fig, row) {
+  /**
+   * 揭开敏感内容遮罩：去掉覆盖层与那层 CSS 重糊，**这一下不下载任何东西**。
+   *
+   * 卡片里摆的本来就是 512px 的缩略图（网格里每一张卡片摆的都是它，被遮住的这张也一样），
+   * 揭开只是不再糊它 —— 之前这里会顺手把**原图**取回来，那是错的：点一下要先下几 MB，
+   * 才看得见一张网格小图；而且原图那条流配的是卡片 sink，会在图**已经看得见**的情况下
+   * 再往上盖一条进度条，看着像卡住了，其实什么也没卡。
+   * 真想看大图就再点一下（灯箱有自己的进度条，那才是进度该出现的地方），或者鼠标停一会儿：
+   * 揭开之后悬停预取就恢复了（遮罩期间特意关着，见 renderGridItem）。
+   */
+  function revealCover(fig, row, img, thumbUrl) {
     fig.classList.remove('is-covered');
     const hint = fig.querySelector('.cover-hint');
     if (hint) hint.remove();
-    const img = fig.querySelector('img');
-    if (!img) return;
-    delete img.dataset.raw; // 允许它重新走一次加载
-    // 到这一步才是「真的要看」—— 取原图
-    dlLoad({
-      fig, img, epoch: dlEpoch,
-      url: row.url, rawUrl: row.url, thumb: false,
-      bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
-    });
+    if (img) delete img.dataset.raw; // 之后再出错就按普通卡片回退到原图（见 onerror）
+    // 没有缩略图的图（SVG/ICO、生成失败）：遮罩期间什么都没下，只有这种才需要现在把原图取回来 ——
+    // 走的正是没被遮罩的卡片那条路（useThumb 为假时取 rawUrl）
+    if (img && !thumbUrl) {
+      dlLoad({
+        fig, img, epoch: dlEpoch,
+        url: row.url, rawUrl: row.url, thumb: false,
+        bytes: 0, total: 0, pct: 0, started: false, blobUrl: null,
+      });
+    }
+    // 揭开 = 用户说了「我要看」：悬停预取随之恢复，点开灯箱照样能命中缓存
+    fig.addEventListener('mouseenter', () => pfHover(row.key));
+    fig.addEventListener('mouseleave', pfCancel);
   }
 
   function renderGridItem(it, mode) {
@@ -4220,7 +4233,6 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const thumbUrlFull = it.thumb_url || null;
     const useThumb = !!thumbUrlFull;
     // 敏感内容遮罩：公开视图里 R15/R18 默认盖一层（底下一张重糊的缩略图），点一下才揭开。
-    // 提前算出来是因为下面 onerror 也要用（遮罩状态下不允许回退到原图）。
     const covered = isPublic && !publicRevealAll() && COVERED_RATINGS.includes(it.rating);
     const img = document.createElement('img');
     img.loading = 'lazy'; // 自取时是 IntersectionObserver 在管，这个只在退回原生那条路上生效
@@ -4228,8 +4240,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     // 必须先挂事件再赋 src：缓存命中时 load 可能在监听器挂上之前就派发完了
     img.onload = () => fig.classList.remove('ph');
     img.onerror = () => {
-      // 遮罩状态下只取缩略图：取不到就保持糊着，**绝不回退到原图**
-      if (covered) return;
+      // 遮罩状态下只取缩略图：取不到就保持糊着，**绝不回退到原图**。
+      // 这里现查 class 而不是用上面算好的 covered —— 揭开之后这张卡就该按普通卡片回退。
+      if (fig.classList.contains('is-covered')) return;
       // 缩略图退回原图的整个过程 .ph 仍在，shimmer 自然盖住重试；原图也失败则整张卡片一起移除
       if (useThumb && !img.dataset.raw) { img.dataset.raw = '1'; img.src = rawUrl; }
       else fig.remove();
@@ -4266,8 +4279,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       });
     }
     // 悬停意图：停够一会儿就预取原图，点开大图时正好命中缓存（见 pfHover）。
-    // 被遮罩的卡片不预取：遮罩的规矩是「点一下才算同意查看」，而预取拉的是**原图** ——
-    // 鼠标顺路扫过就把敏感原图落进缓存，等于绕过遮罩（详见 renderGridItem 里 covered 那支）。
+    // 被遮罩的卡片先不预取：遮罩的规矩是「点一下才算同意查看」，而预取拉的是**原图** ——
+    // 鼠标顺路扫过就把敏感原图落进缓存，等于绕过遮罩。揭开之后才补挂上（见 revealCover）。
     if (!covered) {
       fig.addEventListener('mouseenter', () => pfHover(it.key));
       fig.addEventListener('mouseleave', pfCancel);
@@ -4293,7 +4306,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     if (isPublic) {
       // 游客视图：只读。被遮住的先揭开（第一下点击不下图，是「同意查看」那一下）
       fig.onclick = () => {
-        if (fig.classList.contains('is-covered')) return revealCover(fig, it);
+        if (fig.classList.contains('is-covered')) return revealCover(fig, it, img, thumbUrlFull);
         openLightbox(it);
       };
       fig.addEventListener('contextmenu', (e) => {
