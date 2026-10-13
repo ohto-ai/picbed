@@ -426,6 +426,12 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
   color: #fff; text-align: center; padding: 10px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .65);
 }
+/* 遮罩上的分级提示：就是文件名前那个 pub-badge（配色与九套皮肤的变体原样继承），
+   只把它挪到深色遮罩上 —— 去掉右外边距、字号收小一点，再给里面的警示图标定个尺寸。
+   ⚠️ 这条必须写在皮肤那几条 .pub-badge 规则**之前**（也就是现在这个位置）：皮肤要靠
+   同特异性 + 更靠后赢下背景色，这里只管尺寸与排版，别去碰 background / color。 */
+.grid figure .cover-hint .pub-badge { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 1px 8px; font-size: 11px; }
+.grid figure .cover-hint .pub-badge .ic { width: 11px; height: 11px; stroke-width: 2.2; }
 .grid figure .cover-hint .cover-text { font-size: 12px; line-height: 1.4; }
 .grid figure .cover-hint .cover-btn {
   font-size: 12px; padding: 3px 14px; border-radius: 999px;
@@ -4320,13 +4326,20 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       fig.classList.add('is-covered');
       const hint = document.createElement('div');
       hint.className = 'cover-hint';
+      // 级别提示：把「盖住它的是哪一档」直接写在遮罩上，省得为了看一眼档位先揭开。
+      // 直接复用文件名前那个 pub-badge 的类（含九套皮肤的配色变体），只是挪到深色遮罩上、
+      // 加个警示图标、字号再收一点（见 .cover-hint 里那条覆盖）。未分类写作 U。
+      const badge = document.createElement('span');
+      badge.className = 'pub-badge r-' + it.rating;
+      badge.appendChild(icon('alert'));
+      badge.appendChild(document.createTextNode(it.rating === 'unspecified' ? 'U' : it.rating));
       const txt = document.createElement('span');
       txt.className = 'cover-text';
       txt.textContent = '可能包含敏感内容';
       const btn = document.createElement('span');
       btn.className = 'cover-btn';
       btn.textContent = '查看';
-      hint.append(txt, btn);
+      hint.append(badge, txt, btn);
       fig.appendChild(hint);
       // 只下**缩略图**（512px 那张）：能看出大致轮廓，但看不清内容。
       // 注意 rawUrl 也指向缩略图 —— 下载器任何一条回退路径都不会去取原图。
