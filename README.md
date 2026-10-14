@@ -41,11 +41,11 @@
 
 <table>
 <tr>
-<td width="50%"><img src="docs/preview/skin-lcd-olive.jpg" alt="功能机 LCD · 暗橄榄（默认）"><br><sub>功能机 LCD · 暗橄榄（默认）</sub></td>
+<td width="50%"><img src="docs/preview/skin-y2k.jpg" alt="Y2K · 霓虹翻盖机（默认）"><br><sub>Y2K · 霓虹翻盖机（默认）</sub></td>
 <td width="50%"><img src="docs/preview/skin-skeuo.jpg" alt="早期智能机 · 拟物"><br><sub>早期智能机 · 拟物</sub></td>
 </tr>
 <tr>
-<td><img src="docs/preview/skin-y2k.jpg" alt="Y2K · 霓虹翻盖机"><br><sub>Y2K · 霓虹翻盖机</sub></td>
+<td><img src="docs/preview/skin-lcd-olive.jpg" alt="功能机 LCD · 暗橄榄"><br><sub>功能机 LCD · 暗橄榄</sub></td>
 <td><img src="docs/preview/skin-pda.jpg" alt="PDA · Windows Mobile"><br><sub>PDA · Windows Mobile</sub></td>
 </tr>
 </table>
@@ -56,13 +56,13 @@
 
 | 值 | 外观 |
 | --- | --- |
-| `lcd-olive` | 功能机 LCD（默认）· 暗橄榄：亮版压暗去饱和，不反色 |
+| `lcd-olive` | 功能机 LCD · 暗橄榄：亮版压暗去饱和，不反色 |
 | `lcd` | 功能机 LCD · 亮版砖绿：灰绿底 + 网点 |
 | `lcd-inv` | 功能机 LCD · 反色砖绿：ink 与 paper 对调，深绿屏 + 发光像素 |
 | `lcd-amber` | 功能机 LCD · 琥珀终端 |
 | `lcd-backlight` | 功能机 LCD · 诺基亚背光（暗青绿） |
 | `skeuo` | 早期智能机拟物：亚麻纹理、高光玻璃按钮、相框式卡片 |
-| `y2k` | Y2K 霓虹翻盖机：深紫夜空 + 扫描线 + 青粉霓虹 |
+| `y2k` | Y2K 霓虹翻盖机（默认）· 深紫夜空 + 扫描线 + 青粉霓虹 |
 | `pda` | PDA / Windows Mobile：银灰窗口 + 3D 倒角 |
 | `modern` | 现代简约：原来的设计，带跟随系统的深色档 |
 

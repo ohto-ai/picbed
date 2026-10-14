@@ -22,13 +22,13 @@ window.PICBED_CONFIG = {
   //   modern          现代简约
   //   skeuo           早期智能机拟物
   //   lcd             功能机 LCD · 亮版砖绿
-  //   lcd-olive       功能机 LCD · 暗版暗橄榄   ← 当前默认
+  //   lcd-olive       功能机 LCD · 暗版暗橄榄
   //   lcd-inv         功能机 LCD · 暗版反色砖绿
   //   lcd-amber       功能机 LCD · 暗版琥珀终端
   //   lcd-backlight   功能机 LCD · 暗版诺基亚背光
-  //   y2k             Y2K 霓虹翻盖机
+  //   y2k             Y2K 霓虹翻盖机   ← 当前默认
   //   pda             PDA / Windows Mobile
-  skin: 'lcd-olive',
+  skin: 'y2k',
 
   // CRT 滤镜：叠在任意皮肤之上的一层扫描线 + 荫罩 + 暗角 + 镜头畸变
   // （访客同样可在「风格」里开关。畸变挂的是 backdrop-filter，只有 Chromium 系会弯，

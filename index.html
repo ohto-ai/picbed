@@ -10,15 +10,15 @@
 // （LCD 的绿底和「现代」的浅灰差得远，那一闪很显眼）。
 // 这里只定皮肤和它要用的字体，其余逻辑都在页面底部的主脚本里。
 (function () {
-  // 末尾的 'lcd-olive' 是 config.js 没加载出来时的兜底，正常走 PICBED_CONFIG.skin。
+  // 末尾的 'y2k' 是 config.js 没加载出来时的兜底，正常走 PICBED_CONFIG.skin。
   // 改 config.js 的默认皮肤时，这里跟着改一下保持一致。
-  var d = (window.PICBED_CONFIG || {}).skin || 'lcd-olive';
+  var d = (window.PICBED_CONFIG || {}).skin || 'y2k';
   try { d = localStorage.getItem('picbed_skin') || d; } catch (e) { /* 隐私模式读不到就用默认 */ }
   if (d === 'modern') document.documentElement.removeAttribute('data-skin');
   else document.documentElement.setAttribute('data-skin', d);
   // 只有 LCD 一族与 Y2K 用得上这两个字体族，其余皮肤不必替它们付这次下载。
   // 注意是**前缀**匹配：LCD 有五个变体（lcd-olive / lcd-inv / …），写成 d === 'lcd' 会漏掉它们，
-  // 那样默认皮肤的点阵字就悄悄退成宋体了。
+  // 那样这几套皮肤的点阵字就悄悄退成宋体了。
   // 地址挂在 window 上，运行期切皮肤时主脚本要拿同一个（免得两处字符串写岔）
   window.PICBED_FONT_HREF = 'https://fonts.googleapis.com/css2?family=DotGothic16&family=Orbitron:wght@500;700;900&family=Chakra+Petch:wght@400;600;700&display=swap';
   if (/^(lcd|y2k)/.test(d)) {
