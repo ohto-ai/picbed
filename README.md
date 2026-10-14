@@ -10,6 +10,9 @@
 逻辑跑在 **Worker** 上，前端是一个纯静态单页 —— 没有服务器要运维，也没有一样东西在收费额度之外。
 图片出网流量本身免费，所以「图被人看」这件事不产生账单。
 
+页面和图片**从同一个桶、同一个域名发出去**（`index.html` / `config.js` 也放在 R2 里），
+所以那些要读字节进度的流式 `fetch` 全是同源请求，整站没有一处 CORS 依赖。
+
 在线实例：**<https://img.ohtoai.top/>**（公开画廊，游客视角）
 
 <p align="center">
@@ -26,6 +29,7 @@
 | **大图灯箱** | 点开即看，一键复制 URL / Markdown / HTML，或按图片名字存盘 |
 | **流式下载** | 自己 fetch 字节，所以网格和灯箱都有**真实百分比进度**；慢网下还能「先糊后清」 |
 | **分级与隐藏** | 两个**独立**维度，决定图片是否出现在相册里；直链始终可访问（相册是陈列，不是门禁） |
+| **遮罩** | 敏感内容默认糊住、点一下才显示：公开画廊按 R15/R18，「我的图库」按自己设的「隐藏层级」（默认 R15 起，未分类可单独关掉）。糊着的卡片只下 512px 缩略图、不悬停预取，揭开那一下也不下原图 |
 | **公开画廊** | 游客视角，按分级档位陈列；相册可以直接把链接分享给别人 |
 | **界面风格** | 九套皮肤 + 一个正交的 CRT 滤镜，**访客也能换**（纯外观，不影响数据） |
 | **批量整理** | 多选批量删除 / 移动 / 改分级 / 隐藏；粘贴远程图片 URL 直接转存进桶 |
@@ -226,9 +230,9 @@ LCD 一族更进一步：五个变体共用同一套形态规则（选择器统�
                               也不计 Worker 请求数；R2 出网流量本身免费
 ```
 
-`picbed.ohtoai.top` 与 `album.ohtoai.top` 只是别名：一条 Redirect 规则把两者 301 到
-`img.ohtoai.top`（所以旧链接照旧能开）。**唯一域名是刻意的** —— 页面与图片同源，
-前端那些要读字节进度的流式 `fetch` 就不再依赖 CORS 了。
+站点那两个文件由 CI 传进同一个桶（`push` → 工作流 → 桶，见「部署一套自己的」），
+所以图和页面是**同一个源**。`picbed.ohtoai.top` 与 `album.ohtoai.top` 只是别名：
+一条 Redirect 规则把两者 301 到 `img.ohtoai.top`（所以旧链接照旧能开）。
 
 几个刻意的设计：
 
@@ -259,14 +263,19 @@ npx wrangler secret put PICBED_PASSWORD     # 不设的话管理接口一律 503
 npx wrangler deploy
 ```
 
-然后改 `config.js` 里的三个地址（Worker 地址、唯一域名、仓库地址），把仓库推到 GitHub：
-工作流（`.github/workflows/deploy.yml`）会把 `index.html` 与 `config.js` 传进 R2 桶 ——
-**站点和图片就都在同一个域名上**，那些要读字节进度的 fetch 从此不依赖 CORS。
-还要在 Cloudflare 控制台做几件 wrangler 建不了的事：给 R2 桶绑自定义域名、别开 `r2.dev`
-测试域名，以及加一条免费的 URL Rewrite 规则把 `/` 指到 `/index.html`（桶不会自己找首页）。
+然后改 `config.js` 里的三个地址（Worker 地址、唯一域名、仓库地址），把仓库推到 GitHub。
+**站点自己也从 R2 桶发出去**（就 `index.html` 与 `config.js` 两个文件，CSS/JS 全内联），
+于是页面与图片同源，那些要读字节进度的 fetch 不依赖 CORS：
 
-**完整步骤、接口说明、配置项、以及「以后给已有的库加列/加索引」都在
-[`worker-r2/README.md`](worker-r2/README.md)。**
+- 仓库 → Settings → Secrets and variables → Actions 加一个 `CF_API_TOKEN`
+  （权限只给 **Account · Workers R2 Storage · Edit**），再把 Account ID 填进
+  `worker-r2/wrangler.toml` —— 之后每次 push 由 `.github/workflows/deploy.yml` 把两个文件传进桶
+- 控制台里还有几件 wrangler 建不了的事：给 R2 桶绑自定义域名、别开 `r2.dev` 测试域名、
+  加一条免费的 URL Rewrite 规则把 `/` 内部改写到 `/index.html`（桶不做目录默认页；
+  是改写不是跳转，地址栏不变）
+
+**完整步骤（含别名域名怎么 301 过来、缓存规则怎么设）、接口说明、配置项、以及
+「以后给已有的库加列/加索引」都在 [`worker-r2/README.md`](worker-r2/README.md)。**
 
 ## 目录结构
 
@@ -426,7 +435,9 @@ picbed/
 | 缩略图 404 了一下又正常显示 | 那张图还没补缩略图，前端自动退回原图。点「补缩略图」 |
 | 相册里图片加载慢 | 同上：没有缩略图时下载的是原图 |
 | 上传报 CORS 错 | 检查 Worker 的 `ALLOWED_ORIGINS` 是否包含站点域名 |
-| 老链接打不开 | `album.ohtoai.top` 与 `img.ohtoai.top` 都指向 R2 桶，键名与迁移前一致 |
+| 老链接打不开 | `album.ohtoai.top`、`picbed.ohtoai.top` 现在都 301 到唯一域名 `img.ohtoai.top`，键名与迁移前一致 —— 跟着跳转就行 |
+| 换了域名之后，我这边存的密码与设置不见了 | `localStorage` 按 origin 隔离，换域名等于换了一个站。重填一次即可（访客不受影响） |
+| 自己部署时打开根路径 404 | 桶不做目录默认页：加那条 URL Rewrite 规则（`/` → `/index.html`） |
 | `wrangler … --local` 跑完不回命令行 | wrangler 在 Windows 上回收 workerd 有问题；SQL 已执行完，Ctrl+C 即可 |
 | 用 `wrangler r2 object put` 传了对象，直链却 404 | 该子命令**默认写本地模拟桶**，要加 `--remote` |
 
@@ -434,19 +445,35 @@ picbed/
 
 - **成本**：图片出网流量 **0 元**（R2 出网免费，这是迁移最大的收益 —— 之前 COS 是 0.5 元/GB）。
   存储 644MB 落在 R2 免费额度（10GB）内。Worker / D1 / R2 / CDN 都在免费额度内。
-- **密钥**：R2 的 API Token 只在迁移时用过（rclone），已可作废；
-  Worker 侧只有 `PICBED_PASSWORD`（管理接口的共享密码，`wrangler secret`）。
+- **密钥**：Worker 侧只有 `PICBED_PASSWORD`（管理接口的共享密码，`wrangler secret`）；
+  CI 用一把 `CF_API_TOKEN`（权限只给 Account · Workers R2 Storage · Edit，负责把站点文件传进桶），
+  Account ID 明文写在 `wrangler.toml` 里 —— 它不是密钥，知道它也访问不了任何资源。
+  迁移时那把 rclone token 已可作废。
 - **直链是公开的**：图片域名谁拿到 URL 都能打开，隐藏和分级只管相册陈列。
   介意的话给 R2 桶开防盗链，或把敏感图放别的桶。
 - **管理接口的跨域**：只有 `ALLOWED_ORIGINS` 里列出的来源能拿到 CORS 头，且不带 credentials。
 
 ## 迁移历史
 
-本站原先跑在腾讯云 COS 上（图片直连 COS 自定义域名，Worker 只负责签临时密钥，
-「公开」靠零字节标记对象实现）。现在已整体迁到 Cloudflare R2 + D1：
+### 2026-10：收敛成一个域名，站点也搬进桶
 
-- 326 张存量图片已搬到 R2，键名保持不变，`album.ohtoai.top` 与 `img.ohtoai.top` 都指向 R2 桶，
-  **旧链接依然有效**
+原先站点在 GitHub Pages（`picbed.ohtoai.top`）、图片在 R2 桶的自定义域名（`img.ohtoai.top`），
+两个来源 → 前端那些要读字节进度的 `fetch` 必须跨域。而 R2 只在请求带 `Origin` 时才回
+`Access-Control-Allow-Origin` 与 `Vary: Origin`，不带 Origin 的那份边缘缓存副本两个头都没有，
+「没有 Vary」又对任何请求都算命中 —— 于是偶尔会读到那份没有 ACAO 的副本，表现为**偶发 CORS
+报错、刷新又好了**。
+
+现在站点那两个文件就放在桶的根上，页面与图片同源，这一整类问题在结构上消失；部署从
+GitHub Pages 换成工作流传桶（Pages 那份留作镜像）。`picbed.ohtoai.top` 与 `album.ohtoai.top`
+退成别名，301 到唯一域名 —— 旧链接照旧能开。CF 账单没变：图片仍由桶直出、仍走边缘缓存，
+**这条路上一个 Worker 请求都不花**。
+
+### 更早：从腾讯云 COS 搬到 Cloudflare
+
+本站原先跑在腾讯云 COS 上（图片直连 COS 自定义域名，Worker 只负责签临时密钥，
+「公开」靠零字节标记对象实现）。后来整体迁到 Cloudflare R2 + D1：
+
+- 326 张存量图片已搬到 R2，键名保持不变，**旧链接依然有效**（那两个域名如今 301 到唯一域名）
 - 公开标记被 D1 里的 `rating` 取代；相册从「目录前缀」变成数据库里的一列
 - 迁移脚本、种子 SQL、迁移手册都是**一次性**的，用完已经从仓库里清掉了（需要时翻 git 历史）
 - 腾讯云那边的资源（COS 桶、子账号密钥）**尚未删除**，作为冷备份保留
