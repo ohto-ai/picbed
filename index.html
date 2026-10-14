@@ -4597,13 +4597,14 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
    * 下载这张图 —— 先把字节取成 blob 再存盘，为的是能控制存下来的文件名。
    *
    * 为什么不直接写 `<a href="直链" download="名字">`：
-   *   1. download 属性只在**同源**下生效，图在 img.ohtoai.top、页面在 picbed.ohtoai.top，会被忽略；
-   *   2. 服务端也没法可靠地把名字告诉浏览器：Content-Disposition 的 `inline; filename=`
+   *   1. 服务端没法可靠地把名字告诉浏览器：Content-Disposition 的 `inline; filename=`
    *      不被「图片另存为」采纳（规范只保证 attachment 会预填对话框），而 attachment 会强制下载、
    *      图片再也不能内嵌显示 —— 对图床是自毁。
-   * 自己取成 blob 就没这些限制：blob 是本站源的，download 一定生效，什么浏览器都按这个名字存。
-   * 字节要过一遍 JS，但多半不用走网络：灯箱刚用同一个 URL 下过原图，服务端给了 Cache-Control，
-   * 这一趟基本命中 HTTP 缓存。
+   *   2. download 属性只在**同源**下生效。线上页面与图片现在同源（都在 img.ohtoai.top），
+   *      这条本来不成立了；但 Pages 镜像与别名域名上仍是跨域，那时它照样会被忽略。
+   * 自己取成 blob 就没这些限制：blob 是本源的，download 一定生效，什么浏览器都按这个名字存，
+   * 换个域名打开也一样。字节要过一遍 JS，但多半不用走网络：灯箱刚用同一个 URL 下过原图，
+   * 服务端给了 Cache-Control，这一趟基本命中 HTTP 缓存。
    */
   async function downloadImage(item, btn) {
     const name = downloadName(item);

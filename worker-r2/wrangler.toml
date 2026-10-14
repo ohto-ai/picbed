@@ -8,6 +8,11 @@ name = "picbed-r2"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# 账号 ID 不是密钥（wrangler 的配置里一向是明文写的，知道它也访问不了任何资源）。
+# 写在这里是为了让 CI 少配一个 secret：`.github/workflows/deploy.yml` 只管传站点文件，
+# 只需要一个带 `Workers R2 Storage: Edit` 的 API Token（仓库里已有的 CF_API_TOKEN）。
+account_id = "56b7a606dea43d8763922a42d711c0b3"
+
 # 只保留自定义域名这一个入口（picbed-worker.ohtoai.top）。
 # 注意：加了 [[routes]] 之后 wrangler 本来就会默认关掉 workers.dev，
 # 这里显式写出来是为了表明「这是有意的」，而不是哪次部署忘了开。
@@ -30,7 +35,9 @@ database_id = "0de6009c-2bbf-4a10-b961-140f6680b72b"
 # 键前缀，与旧站保持一致（img/YYYY/MM/DD/…），迁移时键不用改
 PREFIX = "img"
 
-# 直链前缀：R2 桶自定义域名。接口用它拼出完整 URL 返回给前端
+# 直链前缀：R2 桶自定义域名。接口用它拼出完整 URL 返回给前端。
+# 这个域名现在是**唯一域名** —— 站点（index.html / config.js）也放在桶里，页面与图片同源，
+# 所以前端那些流式 fetch 不再依赖 CORS；picbed.ohtoai.top 与 album.ohtoai.top 只做 301 别名。
 IMAGE_BASE = "https://img.ohtoai.top"
 
 # 相册不带 ?rating= 参数时的默认档位：g / r12 / r15 / r18
@@ -56,10 +63,11 @@ UPLOAD_DEFAULT_RATING = "unspecified"
 MAX_UPLOAD_BYTES = "52428800"
 
 # 允许跨域调用管理接口的前端来源（逗号分隔）。
-# 前端在 GitHub Pages 上、Worker 在另一个域名，属于跨域；管理接口默认不发光 CORS 头，
-# 只有这里列出的来源才放行。与 r2-cors.json 的 origins 是同一份名单，改一处记得另一处。
-# 不带 credentials（不用 Cookie），密码靠 x-picbed-key 请求头显式携带。
-ALLOWED_ORIGINS = "https://picbed.ohtoai.top,https://ohto-ai.github.io"
+# 站点本身已经和图片同源了（都在 img.ohtoai.top），但**接口仍在另一个域名**上，所以这份名单
+# 还得有它；另外两条是别名与 Pages 镜像 —— 它们会被 301 走，但镜像上（未跳转时）也要能用。
+# 管理接口默认不发光 CORS 头，只有这里列出的来源才放行。与 r2-cors.json 的 origins 是同一份
+# 名单，改一处记得另一处。不带 credentials（不用 Cookie），密码靠 x-picbed-key 请求头显式携带。
+ALLOWED_ORIGINS = "https://img.ohtoai.top,https://picbed.ohtoai.top,https://ohto-ai.github.io"
 
 # ---------- 关于管理页 ----------
 # src/admin.html 由 index.js 直接 import，wrangler 内置规则里 .html 就是 Text 模块

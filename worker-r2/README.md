@@ -15,16 +15,17 @@
               │ 写
               ▼
      ┌──────────────────────┐
-     │   R2  picbed-images   │◀──── 图片直链（绝大多数请求）
+     │   R2  picbed-images   │◀──── 页面与图片（绝大多数请求）
      └──────────────────────┘        img.ohtoai.top，走 Cloudflare 边缘缓存，
-              ▲                      完全不经 Worker、不计 Worker 请求数
-              │
-     访客看图（直链永远可打开）
+              ▲                      ├ /index.html /config.js → 站点本身
+              │                      └ /img/…                → 图片
+     访客看图 / 打开站点                 完全不经 Worker、不计 Worker 请求数
+     （直链永远可打开）
 ```
 
 三句话概括：
 
-1. **图片字节走 R2 自定义域名直出**，不经过 Worker。所以看图既不计 Worker 请求数、也不计 R2 读（缓存命中时），R2 出网流量本身免费。
+1. **图片字节走 R2 自定义域名直出**，不经过 Worker。所以看图既不计 Worker 请求数、也不计 R2 读（缓存命中时），R2 出网流量本身免费。**站点本身（就 `index.html` 与 `config.js` 两个文件）也放在同一个桶里**，于是页面与图片同源 —— 前端那些要读字节进度的流式 `fetch` 不再依赖 CORS；换成用 Worker 统一路由的话，每张图都会变成一次 Worker 调用（一页最多 100 张），很快就会碰到免费额度那条每天 10 万请求的线。
 2. **D1 只存元数据**，负责管理页的列表、筛选，以及相册接口的陈列范围。
 3. **`is_hidden` 和 `rating` 只影响「相册里列不列」，不拦直链**——任何状态的图，拿到直链都能打开。
    相册是「陈列」，不是「门禁」。想给直链也加门禁的话，见 `src/access.js` 末尾的扩展位说明。
@@ -73,20 +74,57 @@ npx wrangler deploy
 部署完管理页在 `https://picbed-worker.ohtoai.top/admin`。
 （`workers_dev = false`：这个 Worker 只走自定义域名，没有 `*.workers.dev` 入口。）
 
-### 还要在控制台做两件事（wrangler 建不了）
+### 站点也要发上去（同一个桶，页面与图片同源）
+
+站点运行时只要两个文件，推到 GitHub 之后由 `.github/workflows/deploy.yml` 传进桶：
+
+```bash
+# 手动发一次也行（注意 --remote：这个子命令默认写本地模拟桶）
+npx wrangler r2 object put picbed-images/index.html --file=index.html \
+  --config worker-r2/wrangler.toml --content-type="text/html; charset=utf-8" \
+  --cache-control="public, max-age=300" --remote
+npx wrangler r2 object put picbed-images/config.js --file=config.js \
+  --config worker-r2/wrangler.toml --content-type="text/javascript; charset=utf-8" \
+  --cache-control="public, max-age=300" --remote
+```
+
+工作流只要一个 repo secret：`CF_API_TOKEN` —— 权限里要有
+**Account · Workers R2 Storage · Edit**（在旧站那套证书自动化的 token 上加这一条即可，不必新建）。
+Account ID 已经写在 `wrangler.toml` 里（它不是密钥），所以 CI 那边不用再配。
+
+### 还要在控制台做这几件事（wrangler 建不了）
 
 1. **给 R2 桶绑自定义域名**：R2 → `picbed-images` → Settings → Custom Domains → 添加 `img.ohtoai.top`。
    - 该主机名在 Cloudflare DNS 里**不能已有记录**，有的话先删掉
    - 证书由 Cloudflare 自动签发和续期 —— 这一条替代了旧站那整套 acme + 上传证书绑定的 GitHub Action
    - 必须用自定义域名：`r2.dev` 那个测试域名**限流且不支持缓存**，只适合开发
 2. **别开 `r2.dev`**：R2 → Settings → Public Access，保持关闭。
+3. **URL Rewrite 规则**（Rules → Transform Rules → Rewrite URL，免费套餐也有的，额度 10 条）：
+   桶不做「目录默认页」，所以要把根路径内部改写到首页 —— 这是**改写不是跳转**，地址栏不变。
+
+   ```
+   表达式  (http.host in {"img.ohtoai.top" "picbed.ohtoai.top" "album.ohtoai.top"})
+           and http.request.uri.path eq "/"
+   动作    重写路径 → 静态 → /index.html      （查询串原样保留）
+   ```
+4. **别名域名 301 过来**（Rules → Redirect Rules）：`picbed.ohtoai.top` 与 `album.ohtoai.top`
+   一律 301 到 `https://img.ohtoai.top` + 原路径。唯一域名是刻意的：别名上页面与图片必然跨域
+   （`imageBase` 是绝对地址），把人送到同源那一份最省心。
+5. **DNS**：`album.ohtoai.top` 若还绑在桶的 Custom Domains 上，**先解绑**（否则和 CNAME 冲突），
+   再给 `picbed.ohtoai.top`、`album.ohtoai.top` 建 CNAME → `img.ohtoai.top`（橙云代理）。
+6. **GitHub Pages 里删掉自定义域名** `picbed.ohtoai.top`（它已经指向桶了，留着 GitHub 会一直校验）。
+   Pages 那份现在只是镜像，走 `ohto-ai.github.io/picbed`。
 
 可选加固：给 `img.ohtoai.top` 加一条 Cache Rule（Cache Everything，Edge TTL 按需），让所有文件类型都稳定命中缓存，也让「改缓存时长」不必重新上传对象。
+⚠️ 若这条规则的 Edge TTL 写成**固定值**，它会盖过站点文件对象上的 `max-age=300` ——
+`index.html` 更新后就要等满那个 TTL 才生效。要么把规则设成「遵循源站」，
+要么给它加个例外（路径不以 `/img/` 开头时不套用）。
 
 ## 接口
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
+| GET | `https://img.ohtoai.top/` | 无 | 站点首页。桶不会自己找首页，靠控制台那条 URL Rewrite 规则把 `/` 内部改写成 `/index.html` |
 | GET | `https://img.ohtoai.top/<key>` | 无 | 图片直链。**任何状态都能打开**（不经 Worker） |
 | GET | `/api/public/images?album=&rating=&page=&pageSize=` | 公开 | 相册列表，只含可陈列的图。带 CORS |
 | POST | `/api/upload?album=&rating=` | 密码 | 上传。裸 body，文件名放 `X-Filename`（非 ASCII 要 URL 编码）。相册与分级走 **query 参数**：中文相册名在 URL 里天然安全，而且空串能表达「传到根目录」 |
@@ -119,7 +157,11 @@ curl -X POST "https://picbed-worker.ohtoai.top/api/upload?rating=G&album=%E6%97%
 没设密码时管理接口一律 **503**，不会放行。公开的相册接口不需要密码。
 
 **CORS**：公开接口对所有来源放行；管理接口只对 `ALLOWED_ORIGINS` 里列出的来源发光 CORS 头
-（站点的两个域名 + 其余一律不给），身份靠 `x-picbed-key` 头而不是 Cookie，所以不带 credentials。
+（唯一域名 + 两个别名 + Pages 镜像，其余一律不给），身份靠 `x-picbed-key` 头而不是 Cookie，
+所以不带 credentials。
+
+站点与图片现在同源，**前端读图不再需要桶的 CORS**；`r2-cors.json` 留下的用途是别名域名
+（301 生效前的那些请求）与第三方跨域取图。与 `ALLOWED_ORIGINS` 保持同一份名单是既定规矩。
 
 ## 相册的分级参数
 
@@ -188,10 +230,12 @@ npx wrangler d1 execute picbed-db --remote --command="ALTER TABLE images ADD COL
 | 管理接口报 503 | 没设 `PICBED_PASSWORD`（故意 fail closed，不是 bug）。本地开发时在 `worker-r2/.dev.vars` 里写 `PICBED_PASSWORD="dev"` 再重启 dev |
 | 部署时 `custom_domain` 绑定失败 | `img.ohtoai.top` 在 DNS 里已有记录，先删掉那条 |
 | 上传报 CORS 错 | 管理页是同源的，不该有 CORS 问题；若从前端别的域名调管理接口，需要自己加 CORS 头 |
-| 前端 `fetch` 读图报 CORS | 桶的 CORS 没配，跑 `wrangler r2 bucket cors set`；`<img>` 标签不受影响 |
+| 前端 `fetch` 读图报 CORS | 线上页面与图片**同源**，正常不该出现。若在 Pages 镜像或别名域名上遇到，是那条来源不在桶的 CORS 名单里（`wrangler r2 bucket cors set` 重配）；`<img>` 标签不受影响 |
+| 偶发 CORS 报错、刷新又好了（历史问题，已修） | 跨域时代的老毛病：R2 只在请求带 `Origin` 时才回 `Access-Control-Allow-Origin` 与 `Vary: Origin`，不带 Origin 的那份缓存副本两个头都没有，而「没有 Vary」对任何请求都算命中 —— 于是 `fetch` 偶尔读到那份没有 ACAO 的副本。页面搬到桶域名上之后同源了，这条路不再存在 |
 | 上传 413 | 超过 `MAX_UPLOAD_BYTES`；Workers 免费版请求体上限 100MB，别设得太接近 |
 | 用 `wrangler r2 object put` 传了对象，直链却 404 | **这个子命令默认写的是本地模拟桶**，要加 `--remote` 才写线上（wrangler 4.135 实测如此，`get` 同理） |
 | 本地预览图 404 | 正常，管理页会自动回落到 `/i/<key>` |
+| `img.ohtoai.top/` 报错或 404 | 桶不做「目录默认页」。要加那条免费的 URL Rewrite 规则（`/` → `/index.html`），见下面「控制台步骤」 |
 | 改了 `IMAGE_CACHE_SECONDS` 但旧图没变 | 缓存头是上传时烧进对象的；要么重新上传，要么用 Cache Rule 覆盖 Edge TTL |
 
 ## 刻意没做的

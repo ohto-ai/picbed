@@ -1,0 +1,72 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  # 线上真正认的是这一份：站点文件传进 R2 桶，于是**页面与图片同源**（都在 img.ohtoai.top 上），
+  # 跨域那一整类问题（含 CORS 预检、以及边缘缓存里那份没有 ACAO 的副本被读到）就都不存在了。
+  #
+  # 只传 index.html 与 config.js：站点的 CSS / JS 全内联在 index.html 里，字体走 Google，
+  # 运行时不再拉任何别的文件。键就写在桶根上，所以 img.ohtoai.top/index.html 就是站点；
+  # 根路径由一条免费的 URL Rewrite 规则内部改写到它（控制台步骤见 worker-r2/README.md）。
+  #
+  # 只需要一个 repo secret：CF_API_TOKEN（该账号下 Workers R2 Storage 的 Edit 权限；
+  # 旧站那套证书自动化的 token 上加这一条就能用）。Account ID 写在 worker-r2/wrangler.toml 里 ——
+  # 那不是密钥，这样 CI 少配一处。
+  r2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 传站点到 R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          # max-age=300：一 push 几分钟内就能看到新版，又不至于每刷一次都回源。
+          # ⚠️ 桶域名上那条 Cache Rule 若把 Edge TTL 写成固定值，会盖过这个 —— 见 worker-r2/README.md
+          put() {
+            npx --yes wrangler@4 r2 object put "picbed-images/$1" --file="$1" \
+              --config worker-r2/wrangler.toml --content-type="$2" \
+              --cache-control="public, max-age=300" --remote
+          }
+          put index.html "text/html; charset=utf-8"
+          put config.js "text/javascript; charset=utf-8"
+
+  # 镜像：同一份内容也发一份到 GitHub Pages（ohto-ai.github.io/picbed）。
+  # 线上不认它，留着是白捡一个备份与预览地址 —— 它的来源仍在 ALLOWED_ORIGINS / r2-cors.json
+  # 名单里，所以在镜像上打开不会坏（只是图片回到跨域那条路）。
+  mirror:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装站点文件
+        run: |
+          mkdir -p _site
+          # worker-r2 必须显式排除：这个静态站是公开的，而后端源码（含管理页）不该被发布出去
+          rsync -a --exclude '.git' --exclude '.github' \
+            --exclude 'worker-r2' --exclude 'scripts' --exclude 'README.md' \
+            --exclude '.gitignore' --exclude '_site' \
+            ./ _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

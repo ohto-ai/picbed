@@ -3,6 +3,7 @@
     {
       "allowed": {
         "origins": [
+          "https://img.ohtoai.top",
           "https://picbed.ohtoai.top",
           "https://ohto-ai.github.io"
         ],

@@ -1,11 +1,17 @@
 // OhtoAi 图床站点配置：修改后推送到 GitHub 即可生效
+// （.github/workflows/deploy.yml 会把 index.html 与这个文件传进 R2 桶 —— 站点就是从桶里发出去的，
+//   所以这里改了以后等一次工作流，不是等 GitHub Pages）
 // 页面上「设置」里修改的项会存到浏览器本地，优先级高于这里
 window.PICBED_CONFIG = {
-  // 图床后端（Cloudflare Worker）地址
+  // 图床后端（Cloudflare Worker）地址。
+  // 它和站点不同源，所以管理接口要放行本站来源 —— 名单在 worker-r2/wrangler.toml 的 ALLOWED_ORIGINS
   api: 'https://picbed-worker.ohtoai.top',
 
-  // 图片直链域名：R2 桶的自定义域名
-  // （album.ohtoai.top 也指向同一个桶，那是迁移前的老域名，只为让旧链接继续有效）
+  // 站点与图片的**唯一域名**：R2 桶的自定义域名。
+  // 页面（桶里的 index.html）和图片都在它上面，**同源** —— 那些要读字节进度的 fetch 因此
+  // 完全不依赖 CORS（从前页面在 picbed.ohtoai.top、图在 img.ohtoai.top，跨域，边缘缓存里
+  // 偶尔会读到一份没有 ACAO 的副本，表现为「偶发 CORS 报错、刷新又好了」）。
+  // picbed.ohtoai.top 与 album.ohtoai.top 现在只是 301 到这个域名的别名。
   imageBase: 'https://img.ohtoai.top',
 
   // 源码仓库地址：填了会在顶栏给访客显示一个 GitHub 入口，留空则不显示

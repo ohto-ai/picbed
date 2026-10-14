@@ -4,13 +4,13 @@
 [![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-%E5%8D%95%E6%96%87%E4%BB%B6%20HTML-3b82f6?logo=html5&logoColor=white)](index.html)
 [![界面风格](https://img.shields.io/badge/%E7%95%8C%E9%9D%A2%E9%A3%8E%E6%A0%BC-9%20%E5%A5%97%20%2B%20CRT%20%E6%BB%A4%E9%95%9C-8b5cf6)](#界面风格)
 [![成本](https://img.shields.io/badge/%E6%88%90%E6%9C%AC-%EF%BF%A50%20%2F%20%E6%9C%88-22c55e)](#成本与安全)
-[![部署](https://img.shields.io/badge/%E9%83%A8%E7%BD%B2-GitHub%20Pages-222?logo=github&logoColor=white)](https://picbed.ohtoai.top/)
+[![部署](https://img.shields.io/badge/%E9%83%A8%E7%BD%B2-Cloudflare%20R2-F38020?logo=cloudflare&logoColor=white)](https://img.ohtoai.top/)
 
 **图床，但是不（完全）需要服务器后台。** 图片放 Cloudflare **R2**，元数据（分级 / 隐藏 / 相册）放 **D1**，
 逻辑跑在 **Worker** 上，前端是一个纯静态单页 —— 没有服务器要运维，也没有一样东西在收费额度之外。
 图片出网流量本身免费，所以「图被人看」这件事不产生账单。
 
-在线实例：**<https://picbed.ohtoai.top/>**（公开画廊，游客视角）
+在线实例：**<https://img.ohtoai.top/>**（公开画廊，游客视角）
 
 <p align="center">
   <img src="docs/preview/gallery.jpg" width="900" alt="相册网格：深色界面，五列方形缩略图，顶部是公开画廊 / 我的图库切换、GitHub 与风格入口">
@@ -29,7 +29,7 @@
 | **公开画廊** | 游客视角，按分级档位陈列；相册可以直接把链接分享给别人 |
 | **界面风格** | 九套皮肤 + 一个正交的 CRT 滤镜，**访客也能换**（纯外观，不影响数据） |
 | **批量整理** | 多选批量删除 / 移动 / 改分级 / 隐藏；粘贴远程图片 URL 直接转存进桶 |
-| **成本** | 图片出网 ￥0；Worker、D1、GitHub Pages 都在免费额度内 |
+| **成本** | 图片出网 ￥0；Worker、D1、R2、CDN 都在免费额度内（页面与图片同源，不产生任何 Worker 请求） |
 
 ## 界面风格
 
@@ -218,16 +218,24 @@ LCD 一族更进一步：五个变体共用同一套形态规则（选择器统�
          │ ② 写
          ▼
   ┌───────────────────┐
-  │  R2  picbed-images │◀──── ③ 图片直链（绝大多数请求）
-  └───────────────────┘       img.ohtoai.top / album.ohtoai.top
-         ▲                    走 Cloudflare 边缘缓存，**不经过 Worker**，
-         │                    也不计 Worker 请求数；R2 出网流量本身免费
-    访客看图
+  │  R2  picbed-images │◀──── ③ 页面与图片（绝大多数请求）
+  └───────────────────┘       img.ohtoai.top
+         ▲                    ├ /index.html /config.js → 站点本身
+         │                    └ /img/…                 → 图片
+    访客看图 / 打开站点          走 Cloudflare 边缘缓存，**不经过 Worker**，
+                              也不计 Worker 请求数；R2 出网流量本身免费
 ```
+
+`picbed.ohtoai.top` 与 `album.ohtoai.top` 只是别名：一条 Redirect 规则把两者 301 到
+`img.ohtoai.top`（所以旧链接照旧能开）。**唯一域名是刻意的** —— 页面与图片同源，
+前端那些要读字节进度的流式 `fetch` 就不再依赖 CORS 了。
 
 几个刻意的设计：
 
 - **图片字节不经过 Worker**。直链由 R2 桶的自定义域名直接提供，Worker 只管元数据和上传。
+  站点文件（就 `index.html` 与 `config.js` 两个）也放在同一个桶里，于是「页面」与「图片」
+  同源，且**这条路上一个 Worker 请求都不花** —— 换成用 Worker 统一路由的话，每张图都是一次
+  Worker 调用（一页最多 100 张），免费额度那条每天 10 万请求的线很快就会碰到。
 - **`is_hidden` 和 `rating` 只影响「相册里列不列」，不拦直链**。任何状态的图，拿到直链都能打开 ——
   相册是「陈列」，不是「门禁」。想给直链加门禁的话，见 `worker-r2/src/access.js` 末尾的扩展位说明。
 - **两种不可见是独立的**：`is_hidden=1`（主动隐藏）和 `rating='unspecified'`（未分类）都会让图不进相册，
@@ -251,10 +259,11 @@ npx wrangler secret put PICBED_PASSWORD     # 不设的话管理接口一律 503
 npx wrangler deploy
 ```
 
-然后改 `config.js` 里的三个地址（Worker 地址、图片直链域名、仓库地址），把仓库推到 GitHub
-并开启 Pages 即可 —— 工作流已经写好（`.github/workflows/pages.yml`）。
-还要在 Cloudflare 控制台做两件事（wrangler 建不了）：给 R2 桶绑自定义域名、
-别开 `r2.dev` 测试域名。
+然后改 `config.js` 里的三个地址（Worker 地址、唯一域名、仓库地址），把仓库推到 GitHub：
+工作流（`.github/workflows/deploy.yml`）会把 `index.html` 与 `config.js` 传进 R2 桶 ——
+**站点和图片就都在同一个域名上**，那些要读字节进度的 fetch 从此不依赖 CORS。
+还要在 Cloudflare 控制台做几件 wrangler 建不了的事：给 R2 桶绑自定义域名、别开 `r2.dev`
+测试域名，以及加一条免费的 URL Rewrite 规则把 `/` 指到 `/index.html`（桶不会自己找首页）。
 
 **完整步骤、接口说明、配置项、以及「以后给已有的库加列/加索引」都在
 [`worker-r2/README.md`](worker-r2/README.md)。**
@@ -264,7 +273,8 @@ npx wrangler deploy
 ```
 picbed/
 ├─ index.html              # 前端页面（上传 / 相册 / 公开画廊，纯静态单页）
-├─ config.js               # 站点配置（后端地址、图片域名、仓库地址、默认界面风格）
+├─ config.js               # 站点配置（后端地址、唯一域名、仓库地址、默认界面风格）
+├─ .github/workflows/      # deploy.yml：把上面两个文件传进 R2 桶（站点就是从桶里发出去的）
 ├─ docs/preview/           # README 里的预览图
 ├─ worker-r2/              # 后端：Worker + R2 + D1
 │  ├─ src/
@@ -423,7 +433,7 @@ picbed/
 ## 成本与安全
 
 - **成本**：图片出网流量 **0 元**（R2 出网免费，这是迁移最大的收益 —— 之前 COS 是 0.5 元/GB）。
-  存储 644MB 落在 R2 免费额度（10GB）内。Worker / D1 / GitHub Pages 都在免费额度内。
+  存储 644MB 落在 R2 免费额度（10GB）内。Worker / D1 / R2 / CDN 都在免费额度内。
 - **密钥**：R2 的 API Token 只在迁移时用过（rclone），已可作废；
   Worker 侧只有 `PICBED_PASSWORD`（管理接口的共享密码，`wrangler secret`）。
 - **直链是公开的**：图片域名谁拿到 URL 都能打开，隐藏和分级只管相册陈列。
