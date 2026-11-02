@@ -192,7 +192,8 @@ curl -X POST "https://picbed-worker.ohtoai.top/api/upload?rating=G&album=%E6%97%
 | `LIST_CACHE_SECONDS` | `0` | 相册接口的边缘缓存秒数。**0 = 不缓存，永远最新**；访问量上来想省 D1 读取再调大 |
 | `IMAGE_CACHE_SECONDS` | `86400` | 图片直链的缓存秒数，**上传时写进 R2 对象**，改它只影响之后上传的图 |
 | `UPLOAD_DEFAULT_RATING` | `unspecified` | 上传默认分级。想「传完就能直接分享」就改成 `G` |
-| `MAX_UPLOAD_BYTES` | `52428800` | 单文件上限（50MB） |
+| `MAX_UPLOAD_BYTES` | `99614720` | 单文件上限（95MB；免费版单请求体硬上限 100MB，留了余量）。改了同步前端 `index.html` 的 `MAX_UPLOAD_BYTES` |
+| `TRANSFER_MAX_BYTES` | `52428800` | URL 转存单文件上限（50MB）。这条路径整包读内存，受 128MB isolate 内存约束，不能跟着上传上限一起放大 |
 | `ALLOWED_ORIGINS` | 站点的两个域名 | 允许跨域调管理接口的来源（逗号分隔）。前端在 GitHub Pages 上、Worker 在另一个域名，属于跨域；管理接口默认**不发光 CORS 头**，只有这里的来源才放行。不带 credentials（不用 Cookie）。改这里记得同步 `r2-cors.json` |
 
 ### 以后给已有的库加列/加索引

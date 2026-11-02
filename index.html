@@ -1512,7 +1512,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
     </button>
   </div>
-  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 50MB</div>
+  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 95MB</div>
 
   <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
@@ -2037,6 +2037,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   }
 
   // ---------- 上传 ----------
+  // 单文件上限，与服务端 MAX_UPLOAD_BYTES（worker-r2/wrangler.toml）保持一致，两边要一起改。
+  // 免费版单请求体硬上限 100MB，留 5MB 余量给请求头，取 95MB。
+  const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
   const queue = [];
   let processing = false;
 
@@ -2050,7 +2053,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     let skippedReserved = 0;
     for (const f of files) {
       if (!isImageFile(f)) { skippedNonImage++; continue; }
-      if (f.size > 50 * 1024 * 1024) { skippedTooBig++; continue; }
+      if (f.size > MAX_UPLOAD_BYTES) { skippedTooBig++; continue; }
       // 文件夹上传时把相对路径里的目录段并进相册名，保留目录结构
       // （"我的相册/2024/a.jpg" → 「我的相册/2024」）。**整个上传链路只在这里算一次**：
       // relDirs 不幂等，对同一路径再取一次目录段就会多出一层（A → A/A），见 uploadFile。
@@ -2060,7 +2063,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       added++;
     }
     if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
-    if (skippedTooBig) toast(`已跳过 ${skippedTooBig} 个超过 50MB 的文件`, true);
+    if (skippedTooBig) toast(`已跳过 ${skippedTooBig} 个超过 ${MAX_UPLOAD_BYTES / 1048576}MB 的文件`, true);
     if (skippedReserved) toast(`已跳过 ${skippedReserved} 个位于保留目录 _picbed 的文件`, true);
     if (added) {
       openPanel(); // 开始上传时自动展开进度面板
@@ -2121,10 +2124,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   const THUMB_SIZE = 512;                        // 与网格方格子对应（DPR2 下约覆盖 256px 的格子）
   const THUMB_QUALITY = 0.82;
   // 超过这个大小就不在**上传时**生成缩略图（解码一张超大图可能吃掉几百 MB 内存，
-  // 而上传刚结束的页面正处于内存高峰）。取 48MB 是为了覆盖上传上限（50MB）——
+  // 而上传刚结束的页面正处于内存高峰）。取上传上限减 2MB，跟着覆盖上传上限（95MB）——
   // 之前写的 20MB 太小，导致 20MB 以上的图全都静默地没有缩略图。
   // 真解不开也不会卡住上传：整段包在 try/catch 里，失败就退回原图。
-  const THUMB_MAX_SRC_BYTES = 48 * 1024 * 1024;
+  const THUMB_MAX_SRC_BYTES = MAX_UPLOAD_BYTES - 2 * 1024 * 1024;
   const THUMB_SKIP_TYPES = ['image/svg+xml', 'image/x-icon']; // canvas 处理不了
 
   /**

@@ -577,7 +577,9 @@ export async function handleTransfer(request, env) {
   const src = body && body.url;
   if (!src || !/^https?:\/\//i.test(src)) return jsonErr(400, '请提供合法的 http(s) 图片地址');
 
-  const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
+  // 转存上限独立于 MAX_UPLOAD_BYTES：这条路径整包读内存（下面的 arrayBuffer），
+  // 受 128MB isolate 内存约束，不能跟着上传上限一起放大（见 wrangler.toml）。
+  const limit = Number(env.TRANSFER_MAX_BYTES) || 50 * 1024 * 1024;
   let resp;
   try {
     resp = await fetch(src, {

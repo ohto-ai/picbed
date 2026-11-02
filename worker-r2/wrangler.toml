@@ -59,8 +59,13 @@ IMAGE_CACHE_SECONDS = "86400"
 # unspecified = 上传后不进任何相册，必须去管理页选一个分级才会出现在相册里
 UPLOAD_DEFAULT_RATING = "unspecified"
 
-# 单文件大小上限，默认 50MB
-MAX_UPLOAD_BYTES = "52428800"
+# 单文件大小上限。Workers 免费版单请求体硬上限 100MB，留 5MB 余量给请求头取 95MB。
+# 改了记得同步前端 index.html 里的 MAX_UPLOAD_BYTES（上传入口会按它先拦一遍）。
+MAX_UPLOAD_BYTES = "99614720"
+
+# URL 转存（/api/transfer）的单文件上限，独立于上传上限：这条路径是把远程文件整包
+# 读进内存（arrayBuffer）再写 R2，Worker isolate 只有 128MB 内存，不能跟着上传上限一起放大。
+TRANSFER_MAX_BYTES = "52428800"
 
 # 允许跨域调用管理接口的前端来源（逗号分隔）。
 # 站点本身已经和图片同源了（都在 img.ohtoai.top），但**接口仍在另一个域名**上，所以这份名单
