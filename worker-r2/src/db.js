@@ -127,6 +127,15 @@ export async function getImageById(env, id) {
   return await env.DB.prepare(`SELECT ${COLS} FROM images WHERE id = ?`).bind(id).first();
 }
 
+/**
+ * 按键取一条。
+ * 分片 complete 的重试去重用：键是不可变且唯一的，同一个键已经有记录，
+ * 说明上一次 complete 其实成功了（只是响应没回到客户端）——直接返回那条，别再传一遍。
+ */
+export async function getImageByKey(env, key) {
+  return await env.DB.prepare(`SELECT ${COLS} FROM images WHERE r2_key = ?`).bind(key).first();
+}
+
 /** 按 id 批量取（删除前要先拿到 r2_key） */
 export async function getImagesByIds(env, ids) {
   const out = [];

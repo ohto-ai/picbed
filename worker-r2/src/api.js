@@ -192,6 +192,53 @@ function thumbKeyOf(key, contentType) {
 class TooLargeError extends Error {}
 class EmptyBodyError extends Error {}
 
+/** 图片对象的 HTTP 元数据（直链的内容类型与缓存时长），单传与分片两套路径共用 */
+function imageHttpMetadata(env, contentType) {
+  const httpMetadata = { contentType: contentType || 'application/octet-stream' };
+  const cacheSeconds = Number(env.IMAGE_CACHE_SECONDS) || 0;
+  if (cacheSeconds > 0) httpMetadata.cacheControl = `public, max-age=${cacheSeconds}`;
+  return httpMetadata;
+}
+
+/** 上传分级：非法值静默回落到 unspecified（与旧行为一致） */
+function normRating(raw, env) {
+  const rating = String(raw || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
+  return RATINGS.includes(rating) ? rating : 'unspecified';
+}
+
+/**
+ * 上传相册。raw 为 undefined / null 表示「没指定」→ 按日期归档；
+ * 空串是有效意图「传到根目录」。
+ * @returns {string|null} null 表示含保留段（调用方应回 400）
+ */
+function normAlbum(raw, env) {
+  return raw === undefined || raw === null ? dateAlbum() : safeAlbum(raw);
+}
+
+/** 文件名只取最后一段，避免有人塞路径进来 */
+function normFilename(raw) {
+  return String(raw == null ? '' : raw).split(/[\\/]/).pop().slice(0, 200) || 'image';
+}
+
+function normContentType(raw) {
+  return String(raw || '').split(';')[0].trim().toLowerCase();
+}
+
+/** 分片接口用的键校验：必须是本站前缀下的键，且不能有 . / .. 路径段 */
+function validStorageKey(env, key) {
+  const prefix = String(env.PREFIX || 'img').replace(/^\/+|\/+$/g, '') || 'img';
+  if (!key || !key.startsWith(prefix + '/')) return false;
+  return !key.split('/').some((s) => s === '.' || s === '..');
+}
+
+/**
+ * R2 的分片错误里，只有「会话不存在 / 已过期 / 已完成」该让客户端整传重来（410）；
+ * 其它（R2 短暂故障、网络等）回 502，客户端会按普通可重试错误退避重试，不会白扔已传分片。
+ */
+function isMissingUploadError(e) {
+  return /does not exist|NoSuchUpload|not found|10024/i.test(String((e && e.message) || e || ''));
+}
+
 /**
  * 把请求体写进 R2，并保证不超过 limit。返回实际写入的字节数。
  *
@@ -209,9 +256,7 @@ async function putObjectLimited(env, key, request, contentType, limit) {
   const declared = Number(request.headers.get('content-length') || 0);
   if (declared > limit) throw new TooLargeError('declared too large');
 
-  const httpMetadata = { contentType: contentType || 'application/octet-stream' };
-  const cacheSeconds = Number(env.IMAGE_CACHE_SECONDS) || 0;
-  if (cacheSeconds > 0) httpMetadata.cacheControl = `public, max-age=${cacheSeconds}`;
+  const httpMetadata = imageHttpMetadata(env, contentType);
 
   if (declared > 0) {
     const obj = await env.BUCKET.put(key, request.body, { httpMetadata });
@@ -273,22 +318,20 @@ export async function handleUpload(request, env) {
   if (!request.body) return jsonErr(400, '空请求体');
 
   // 文件名：只取最后一段，避免有人塞路径进来
-  const filename = headerText(request, 'x-filename').split(/[\\/]/).pop().slice(0, 200) || 'image';
+  const filename = normFilename(headerText(request, 'x-filename'));
 
-  const contentType = (request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const contentType = normContentType(request.headers.get('content-type'));
 
   // 分级和相册走 query 参数（`?rating=&album=`）。为什么不用请求头：
   //   1. HTTP 头只能放 Latin-1，中文相册名得先 URL 编码再由服务端解回来，绕；
   //   2. 头里区分不出「没传」和「传了空值」，而 album= 空串正是「传到根目录」这个有效意图。
   const q = new URL(request.url).searchParams;
 
-  let rating = String(q.get('rating') || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
-  if (!RATINGS.includes(rating)) rating = 'unspecified';
+  const rating = normRating(q.get('rating'), env);
 
   // 相册只写数据库列，不进键：键保持不透明不可变，之后随便改相册都不会动直链。
   // 完全不指定时才按日期归档（YYYY/MM/DD），与迁移过来的老图保持同一套相册命名。
-  const albumRaw = q.has('album') ? q.get('album') : null;
-  const album = albumRaw === null ? dateAlbum() : safeAlbum(albumRaw);
+  const album = normAlbum(q.has('album') ? q.get('album') : undefined, env);
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
   const key = makeKey(env, filename, contentType);
@@ -323,6 +366,210 @@ export async function handleUpload(request, env) {
   }
 
   return jsonAdmin({ image: shape({ id, ...row }, env) }, 201);
+}
+
+// ---------- 分片上传（大文件） ----------
+//
+// 协议：begin 拿 {key, uploadId} → 若干个 PUT part（每个分片一个独立请求）→ complete → 写 D1。
+// 服务端**不保存会话状态**：uploadId 与已传分片由客户端保存（官方指南就是这么设计的），
+// 未完成的会话由 R2 自己兜底（7 天未完成自动中止），这里不需要清理任务。
+//
+// 分片约束（R2 侧）：除最后一片外每片 ≥ 5MiB；单文件最多 10000 片。
+// 前端用 10MiB 一片，单文件仍在 MAX_UPLOAD_BYTES（95MB）以内，远低于 100MB 请求体硬上限。
+
+/** POST /api/upload/begin —— 建立分片会话，返回 {key, uploadId} */
+export async function handleUploadBegin(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return jsonErr(400, error);
+
+  const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
+  const size = Number(body && body.size);
+  if (!Number.isFinite(size) || size <= 0) return jsonErr(400, '缺少有效的文件大小');
+  if (size > limit) return jsonErr(413, `文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`);
+
+  const filename = normFilename(body.filename);
+  const contentType = normContentType(body.contentType);
+  // 相册/分级真正落库在 complete；这里先把能提前发现的问题（保留名）挡掉，
+  // 免得用户白传 90MB 之后才拿到 400。
+  const album = normAlbum(body.album, env);
+  if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
+
+  const key = makeKey(env, filename, contentType);
+  try {
+    const upload = await env.BUCKET.createMultipartUpload(key, {
+      httpMetadata: imageHttpMetadata(env, contentType),
+      // 把声明的大小烧进 R2 对象元数据：complete 时用它核对合并后的真实大小，
+      // 防止「只传了一部分分片就 complete」这种错误悄悄生成一张残缺的图。
+      customMetadata: { declaredSize: String(size) },
+    });
+    return jsonAdmin({ key, uploadId: upload.uploadId }, 201);
+  } catch (e) {
+    return jsonErr(502, '创建分片上传失败：' + (e && e.message ? e.message : e));
+  }
+}
+
+/**
+ * PUT /api/upload/part?key=&uploadId=&partNumber= —— 上传一个分片（裸 body）。
+ *
+ * 有 Content-Length 时直接把 request.body 交给 R2（流式、不占内存）：
+ * 官方示例就是传 request.body，前提是长度已知（浏览器 XHR 一定会带）。
+ * 没有长度时只能整片读进内存 —— 一片只有 10MiB，可接受。
+ */
+export async function handleUploadPart(request, url, env) {
+  const key = url.searchParams.get('key') || '';
+  const uploadId = url.searchParams.get('uploadId') || '';
+  const partNumber = Number(url.searchParams.get('partNumber'));
+
+  if (!validStorageKey(env, key)) return jsonErr(400, '非法键');
+  if (!uploadId) return jsonErr(400, '缺少 uploadId');
+  if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+    return jsonErr(400, 'partNumber 必须是 1-10000 的整数');
+  }
+  if (!request.body) return jsonErr(400, '空请求体');
+
+  // 单片不可能比整个文件上限还大；先按声明值挡一道，避免把超大请求体转给 R2
+  const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (declared > limit) return jsonErr(413, '分片过大');
+
+  let payload;
+  if (declared > 0) {
+    payload = request.body;
+  } else {
+    payload = await request.arrayBuffer();
+    if (!payload.byteLength) return jsonErr(400, '空分片');
+    if (payload.byteLength > limit) return jsonErr(413, '分片过大');
+  }
+
+  try {
+    const upload = env.BUCKET.resumeMultipartUpload(key, uploadId);
+    const part = await upload.uploadPart(partNumber, payload);
+    return jsonAdmin({
+      partNumber: part.partNumber,
+      etag: part.etag,
+      size: declared > 0 ? declared : payload.byteLength,
+    });
+  } catch (e) {
+    // 410 = 会话已失效（uploadId 过期 / 已被 abort）：前端据此丢弃分片状态、重新 begin 整传。
+    // 其它错误回 502，让客户端按可重试错误处理（退避后重传这一片，而不是整传重来）。
+    return jsonErr(
+      isMissingUploadError(e) ? 410 : 502,
+      '分片上传失败：' + (e && e.message ? e.message : e)
+    );
+  }
+}
+
+/** POST /api/upload/complete —— 合并分片、写 D1。body: {key, uploadId, filename, contentType, album?, rating?, parts:[{partNumber, etag}]} */
+export async function handleUploadComplete(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return jsonErr(400, error);
+
+  const key = String((body && body.key) || '');
+  const uploadId = String((body && body.uploadId) || '');
+  if (!validStorageKey(env, key)) return jsonErr(400, '非法键');
+  if (!uploadId) return jsonErr(400, '缺少 uploadId');
+
+  const rawParts = Array.isArray(body.parts) ? body.parts : [];
+  if (!rawParts.length) return jsonErr(400, 'parts 不能为空');
+  if (rawParts.length > 10000) return jsonErr(400, '分片数量超出上限');
+
+  const parts = [];
+  for (const p of rawParts) {
+    const n = Number(p && (p.partNumber != null ? p.partNumber : p.n));
+    const etag = p && p.etag;
+    if (!Number.isInteger(n) || n < 1 || n > 10000) {
+      return jsonErr(400, 'partNumber 必须是 1-10000 的整数');
+    }
+    if (typeof etag !== 'string' || !etag) return jsonErr(400, '缺少分片 etag');
+    parts.push({ partNumber: n, etag });
+  }
+  parts.sort((a, b) => a.partNumber - b.partNumber);
+  for (let i = 1; i < parts.length; i++) {
+    if (parts[i].partNumber === parts[i - 1].partNumber) return jsonErr(400, '分片编号重复');
+  }
+
+  const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
+  const filename = normFilename(body.filename);
+  const contentType = normContentType(body.contentType);
+  const rating = normRating(body.rating, env);
+  const album = normAlbum(body.album, env);
+  if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
+
+  let obj;
+  try {
+    const upload = env.BUCKET.resumeMultipartUpload(key, uploadId);
+    obj = await upload.complete(parts);
+  } catch (e) {
+    // 上一次 complete 可能其实成功了、只是响应没回到客户端（断网/关页）。
+    // 键是不可变的，D1 里已经有这个键就直接把它当成功返回，避免客户端重传出一张重复图。
+    const existing = await db.getImageByKey(env, key).catch(() => null);
+    if (existing) return jsonAdmin({ image: shape(existing, env) });
+    return jsonErr(
+      isMissingUploadError(e) ? 410 : 502,
+      '合并分片失败：' + (e && e.message ? e.message : e)
+    );
+  }
+
+  // 兜底复核真实大小：begin 时把声明值写进了 R2 的 customMetadata，
+  // 合并后对不上就说明分片不完整（或客户端声明有误），删对象回 400。
+  const size = obj && obj.size;
+  if (!size) {
+    await env.BUCKET.delete(key).catch(() => {});
+    return jsonErr(400, '空文件');
+  }
+  const expected = Number(
+    (obj.customMetadata && obj.customMetadata.declaredSize) || (body && body.size) || 0
+  );
+  if (expected > 0 && size !== expected) {
+    await env.BUCKET.delete(key).catch(() => {});
+    return jsonErr(400, `分片不完整：合并后 ${size} 字节，与声明的 ${expected} 字节不一致`);
+  }
+  if (size > limit) {
+    await env.BUCKET.delete(key).catch(() => {});
+    return jsonErr(413, `文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`);
+  }
+
+  const row = {
+    r2_key: key,
+    filename,
+    mime: contentType || null,
+    size,
+    is_hidden: 0,
+    rating,
+    album,
+    uploaded_at: db.nowIso(),
+  };
+
+  try {
+    const id = await db.insertImage(env, row);
+    return jsonAdmin({ image: shape({ id, ...row }, env) }, 201);
+  } catch (e) {
+    await env.BUCKET.delete(key).catch(() => {});
+    return jsonErr(500, '元数据写入失败：' + (e && e.message ? e.message : e));
+  }
+}
+
+/** POST /api/upload/abort —— 放弃一个分片会话，清掉 R2 侧已传分片。body: {key, uploadId} */
+export async function handleUploadAbort(request, env) {
+  const { body, error } = await readJson(request);
+  if (error) return jsonErr(400, error);
+
+  const key = String((body && body.key) || '');
+  const uploadId = String((body && body.uploadId) || '');
+  if (!validStorageKey(env, key)) return jsonErr(400, '非法键');
+  if (!uploadId) return jsonErr(400, '缺少 uploadId');
+
+  try {
+    await env.BUCKET.resumeMultipartUpload(key, uploadId).abort();
+    return jsonAdmin({ ok: true });
+  } catch (e) {
+    // 会话本来就不存在（已过期 / 已完成）时 abort 会报错；对调用方来说结果一样，都是「没了」。
+    // 前端对这条请求是 fire-and-forget，状态码只用于排障。
+    return jsonErr(
+      isMissingUploadError(e) ? 410 : 502,
+      '放弃会话失败：' + (e && e.message ? e.message : e)
+    );
+  }
 }
 
 // ---------- 管理：列表 / 修改 / 删除 ----------

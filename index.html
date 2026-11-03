@@ -284,6 +284,24 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .q-fill { height: 100%; width: 0; background: var(--grad); border-radius: 2px; transition: width .2s; }
 .q-status { font-size: 12px; color: var(--muted); }
 .q-item.error .q-status { color: var(--danger); cursor: pointer; }
+.q-item.paused { border-color: var(--muted); }
+.q-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.q-act {
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: none; border-radius: 6px; background: none; color: var(--muted); cursor: pointer;
+}
+.q-act .ic { width: 15px; height: 15px; }
+.q-act:hover { background: var(--accent-soft); color: var(--text); }
+.q-act.danger:hover { color: var(--danger); }
+
+.upload-hint { padding: 0 12px 8px; font-size: 11px; color: var(--muted); }
+.resume-bar { border: 1px dashed var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+.resume-head { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.resume-head .ic { width: 14px; height: 14px; color: var(--muted); }
+#resumeList { list-style: none; margin: 6px 0 0; padding: 0; max-height: 128px; overflow-y: auto; }
+#resumeList li { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; }
+#resumeList .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#resumeList .r-meta { color: var(--muted); white-space: nowrap; font-size: 11px; }
 
 /* 区块标题 */
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 22px 0 10px; }
@@ -607,7 +625,7 @@ body.marqueeing .grid figure { cursor: default; transform: none; }
 .panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .panel-head h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 15px; font-weight: 650; }
 .panel-head h2 .ic { width: 16px; height: 16px; color: var(--accent); }
-.panel-badge { font-size: 12px; color: var(--muted); }
+.panel-badge { font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-close { display: grid; place-items: center; border: none; background: none; color: var(--muted); cursor: pointer; padding: 5px; border-radius: 7px; }
 .panel-close .ic { width: 15px; height: 15px; }
 .panel-close:hover { background: var(--accent-soft); color: var(--text); }
@@ -1463,6 +1481,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 17.5l-5.5-5.5L9 6.5"/><path d="M15 6.5l5.5 5.5L15 17.5"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5V12l3.5 2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5v14M15.5 5v14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5.5l6.5 6.5L9 18.5"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M20.5 15.5l-4-4-9.5 9.5"/></symbol>
@@ -1512,7 +1532,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
     </button>
   </div>
-  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 95MB</div>
+  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 95MB · 支持暂停/断点续传</div>
 
   <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
@@ -1564,6 +1584,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     <h2><svg class="ic"><use href="#i-upload"/></svg>上传</h2>
     <span id="panelBadge" class="panel-badge"></span>
     <span class="gallery-spacer"></span>
+    <button id="pauseAllBtn" class="btn small ghost" hidden><svg class="ic"><use href="#i-pause"/></svg><span class="lbl">暂停全部</span></button>
     <button id="panelClose" class="panel-close" title="收起"><svg class="ic"><use href="#i-x"/></svg></button>
   </div>
   <div style="display:flex;align-items:center;gap:8px;padding:0 12px 8px;font-size:12px;color:var(--muted);">
@@ -1578,6 +1599,22 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       </select>
     </label>
   </div>
+  <div class="upload-hint">单张 ≤ 95MB · 支持暂停 / 断点续传 · 大文件自动分片并行</div>
+
+  <!-- 上次关页留下的会话：没有 File 句柄，要用户把原文件重新选一次才能接着传 -->
+  <div id="resumeBar" class="resume-bar" hidden>
+    <div class="resume-head">
+      <svg class="ic"><use href="#i-clock"/></svg>
+      <strong>待续传</strong>
+      <span id="resumeCount" class="panel-badge"></span>
+      <span class="gallery-spacer"></span>
+      <button id="resumePickBtn" class="btn small">选择文件续传</button>
+      <button id="resumeDropBtn" class="btn small ghost">全部放弃</button>
+    </div>
+    <ul id="resumeList"></ul>
+  </div>
+  <input type="file" id="resumeInput" accept="image/*" multiple hidden>
+
   <div id="queue"></div>
   <div id="resultsSection" hidden>
     <div class="section-head">
@@ -2040,35 +2077,99 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // 单文件上限，与服务端 MAX_UPLOAD_BYTES（worker-r2/wrangler.toml）保持一致，两边要一起改。
   // 免费版单请求体硬上限 100MB，留 5MB 余量给请求头，取 95MB。
   const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
-  const queue = [];
-  let processing = false;
+
+  // 大文件走 R2 分片上传：每片 10MiB、最多 4 片并发。分片是**独立的 HTTP 请求**，
+  // 所以并行、暂停（abort 在途分片）、断点续传都是天然的；单片又远小于 100MB 请求体上限。
+  // ≤ MULTIPART_THRESHOLD 的文件仍走单请求直传（快路径，也让 admin.html 那条接口保持原样）。
+  const PART_SIZE = 10 * 1024 * 1024;
+  const MULTIPART_THRESHOLD = 10 * 1024 * 1024;
+  const CONCURRENCY = 4;
+  const PART_RETRIES = 3;
+  const RETRY_DELAYS = [1000, 3000, 9000];
+  const UPLOAD_STORE_KEY = 'picbed_uploads_v1';
+  // R2 侧未完成的分片上传 7 天自动中止，本地会话按同一个窗口过期
+  const UPLOAD_SESSION_TTL = 7 * 86400000;
+
+  const queue = [];                 // 本页正在进行的上传（含暂停/失败）
+  const taskQueue = [];             // 待执行的池任务：{type:'start'|'part', item, n}
+  const orphanSessions = new Map(); // 上次关页留下的会话（还没有 File 句柄）：ident → session
+
+  let activeTasks = 0;
+  let pumpScheduled = false;
+  let itemSeq = 0;
+  let thumbChain = Promise.resolve(); // 缩略图解码串行：4 路并发解码会内存尖峰
+  let dirtyGallery = false;
+  let thumbFailedCount = 0;
+  let speedSamples = [];
+  let lastSpeedPush = 0;
+  let uiTimer = 0;
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n >= 1024) return Math.round(n / 1024) + ' KB';
+    return n + ' B';
+  }
+
+  /** 文件身份四元组：断点续传靠它把「重新选中的同一个文件」认回来 */
+  function identOfFile(f) {
+    return [f.name, f.size, f.lastModified || 0, f.type || ''].join('\u0000');
+  }
+  function identOfSession(s) {
+    return [s.name, s.size, s.lastModified || 0, s.type || ''].join('\u0000');
+  }
 
   // targetAlbum 不传就传进当前所在的相册
   function addFiles(files, targetAlbum) {
     if (!needWorker()) return;
     const base = targetAlbum === undefined || targetAlbum === null ? curAlbum : targetAlbum;
     let added = 0;
+    let resumed = 0;
     let skippedNonImage = 0;
     let skippedTooBig = 0;
     let skippedReserved = 0;
+    let skippedDup = 0;
     for (const f of files) {
       if (!isImageFile(f)) { skippedNonImage++; continue; }
       if (f.size > MAX_UPLOAD_BYTES) { skippedTooBig++; continue; }
       // 文件夹上传时把相对路径里的目录段并进相册名，保留目录结构
       // （"我的相册/2024/a.jpg" → 「我的相册/2024」）。**整个上传链路只在这里算一次**：
-      // relDirs 不幂等，对同一路径再取一次目录段就会多出一层（A → A/A），见 uploadFile。
+      // relDirs 不幂等，对同一路径再取一次目录段就会多出一层（A → A/A）。
       const album = albumJoin(base, relDirs(f.__relPath || f.name));
       if (sanitizeAlbum(album) === null) { skippedReserved++; continue; } // 含保留段 _picbed
+
+      const ident = identOfFile(f);
+      // 同一个文件已经在队列里：暂停/失败的顺手恢复，正在传的忽略重复
+      //（重新选一次文件本来就是「继续」最自然的入口；重复上传会生成两个 key）
+      const live = queue.find((it) => it.state !== 'done' && identOfFile(it.file) === ident);
+      if (live) {
+        if (live.state === 'failed') { retryItem(live); resumed++; }
+        else if (live.state === 'paused') { resumeItem(live); resumed++; }
+        else skippedDup++;
+        continue;
+      }
+      // 上次关页留下的会话：接管续传（相册/分级沿用会话里的，键和已传分片都不变）
+      const saved = orphanSessions.get(ident);
+      if (saved) {
+        adoptSession(saved, f);
+        resumed++;
+        continue;
+      }
       enqueue(f, album);
       added++;
     }
     if (skippedNonImage) toast(`已跳过 ${skippedNonImage} 个非图片文件`, true);
     if (skippedTooBig) toast(`已跳过 ${skippedTooBig} 个超过 ${MAX_UPLOAD_BYTES / 1048576}MB 的文件`, true);
     if (skippedReserved) toast(`已跳过 ${skippedReserved} 个位于保留目录 _picbed 的文件`, true);
-    if (added) {
+    if (skippedDup) toast(`已忽略 ${skippedDup} 个正在上传中的重复文件`, true);
+    if (resumed) toast(`已接管 ${resumed} 个未完成的上传，从断点继续`);
+    if (added || resumed) {
       openPanel(); // 开始上传时自动展开进度面板
-      processQueue();
-    } else if (!skippedNonImage && !skippedTooBig && !skippedReserved) toast('没有找到可上传的图片', true);
+      pump();
+    } else if (!skippedNonImage && !skippedTooBig && !skippedReserved && !skippedDup) {
+      toast('没有找到可上传的图片', true);
+    }
   }
 
   // 递归收集拖入的文件夹里的图片（保留相对路径）
@@ -2182,11 +2283,25 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     return (el && el.value) || 'unspecified';
   }
 
+  function cancelledError() {
+    const e = new Error('已取消');
+    e.cancelled = true;
+    return e;
+  }
+
+  function xhrError(xhr, data) {
+    const e = new Error((data && data.error) || ('HTTP ' + xhr.status));
+    e.status = xhr.status;
+    e.auth = xhr.status === 403 || xhr.status === 503;
+    return e;
+  }
+
   /**
-   * 单文件上传。用 XHR 而不是 fetch，是因为 fetch 读不到上传进度。
+   * 小文件单请求直传。用 XHR 而不是 fetch，是因为 fetch 读不到上传进度。
    * 分级与相册走 query 参数（中文相册名在 URL 里天然安全，空串能表达「传到根目录」）。
+   * item 用来登记在途 XHR（暂停/取消时 abort）并把进度写回队列。
    */
-  function uploadOne(file, album, rating, onProgress) {
+  function uploadOne(file, album, rating, onProgress, item) {
     return new Promise((resolve, reject) => {
       const qs = new URLSearchParams();
       qs.set('album', album || '');
@@ -2198,22 +2313,31 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       xhr.setRequestHeader('x-filename', encodeURIComponent(file.name)); // 头只能放 Latin-1，中文名要先编码
       xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
 
-      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      let settled = false;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        if (item) item._xhrs.delete(xhr);
+        fn(value);
+      };
+
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
       xhr.onload = () => {
         let data = null;
         try { data = JSON.parse(xhr.responseText); } catch (e) { /* 可能没有 JSON 体 */ }
-        if (xhr.status >= 200 && xhr.status < 300 && data && data.image) return resolve(data.image);
-        const err = new Error((data && data.error) || ('HTTP ' + xhr.status));
-        err.status = xhr.status;
-        err.auth = xhr.status === 403 || xhr.status === 503;
-        reject(err);
+        if (xhr.status >= 200 && xhr.status < 300 && data && data.image) return settle(resolve, data.image);
+        settle(reject, xhrError(xhr, data));
       };
-      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.onerror = () => settle(reject, new Error('网络错误'));
+      xhr.onabort = () => settle(reject, cancelledError());
+      if (item) item._xhrs.add(xhr);
       xhr.send(file);
     });
   }
 
-  function enqueue(file, uploadAlbum) {
+  /** 建一行队列 DOM：缩略图 + 名称/进度/状态 + 暂停/取消按钮 */
+  function buildRow(item) {
+    const file = item.file;
     const row = document.createElement('div');
     row.className = 'q-item';
     const thumb = document.createElement('img');
@@ -2225,7 +2349,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     name.className = 'q-name';
     name.textContent = file.__relPath || file.name;
     // 上传文件夹时路径和相册容易看混（"我的相册/a.jpg" 会进「我的相册」），标题里把落点写全
-    name.title = uploadAlbum ? `${name.textContent}\n→ 相册「${uploadAlbum}」` : `${name.textContent}\n→ 相册「根目录」`;
+    name.title = item.album ? `${name.textContent}\n→ 相册「${item.album}」` : `${name.textContent}\n→ 相册「根目录」`;
     const bar = document.createElement('div');
     bar.className = 'q-bar';
     const fill = document.createElement('div');
@@ -2235,102 +2359,762 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     status.className = 'q-status';
     status.textContent = '等待上传';
     body.append(name, bar, status);
-    row.append(thumb, body);
+
+    const actions = document.createElement('div');
+    actions.className = 'q-actions';
+    const pauseBtn = document.createElement('button');
+    pauseBtn.type = 'button';
+    pauseBtn.className = 'q-act';
+    pauseBtn.title = '暂停';
+    pauseBtn.appendChild(icon('pause'));
+    pauseBtn.onclick = () => (item.state === 'paused' ? resumeItem(item) : pauseItem(item));
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'q-act danger';
+    cancelBtn.title = '取消上传';
+    cancelBtn.appendChild(icon('x'));
+    cancelBtn.onclick = () => cancelItem(item);
+    actions.append(pauseBtn, cancelBtn);
+
+    row.append(thumb, body, actions);
     if (URL.createObjectURL) {
       const u = URL.createObjectURL(file);
       thumb.src = u;
       thumb.onload = () => URL.revokeObjectURL(u);
     }
     $('queue').appendChild(row);
-    queue.push({ file, row, fill, status, done: false, failed: false, pct: 0, album: uploadAlbum || null });
-    updateUploadFab();
+
+    item.row = row;
+    item.fill = fill;
+    item.statusEl = status;
+    item.pauseBtn = pauseBtn;
+    item.cancelBtn = cancelBtn;
+    renderItem(item);
   }
 
-  async function uploadFile(file, item) {
-    const { fill, status } = item;
-    // 相册在 addFiles 里就定型了（含文件夹上传的目录段），这里原样用。
-    // 早先这里又算了一次 relDirs —— 那是个 bug：relDirs("A/x.jpg") = "A"，
-    // 再拼到已经算好的 "A" 后面就成了 "A/A"，于是上传 A 文件夹会凭空多出一层。
-    const album = item.album || '';
+  /**
+   * 新建一个上传并放进池子。
+   * saved 是 localStorage 里读回来的会话（续传时传入）：键、uploadId、已传分片原样接上。
+   * 相册在 addFiles 里就定型了（含文件夹上传的目录段），这里原样用。
+   */
+  function enqueue(file, uploadAlbum, saved) {
+    const item = {
+      id: 'u' + (++itemSeq),
+      file,
+      album: uploadAlbum || '',
+      rating: (saved && saved.rating) || '',
+      state: 'pending',
+      key: (saved && saved.key) || '',
+      uploadId: (saved && saved.uploadId) || '',
+      parts: [],
+      _inflight: {},
+      _xhrs: new Set(),
+      multipart: file.size > MULTIPART_THRESHOLD,
+      preparing: false,
+      finishing: false,
+      thumbPhase: false,
+      restarted: false,
+      loadedBytes: 0,
+      imageId: 0,
+      error: '',
+      startedAt: (saved && saved.startedAt) || Date.now(),
+      pct: 0,
+    };
+    if (saved) {
+      item.parts = (Array.isArray(saved.parts) ? saved.parts : [])
+        .map((p) => ({ n: Number(p.n || p.partNumber) || 0, etag: p.etag, size: Number(p.size) || 0 }))
+        .filter((p) => p.n > 0 && p.etag);
+    }
+    buildRow(item);
+    queue.push(item);
+    scheduleStart(item);
+    saveUploads();
+    updateUploadFab();
+    return item;
+  }
 
-    const image = await uploadOne(file, album, currentUploadRating(), (p) => {
-      const pct = Math.min(100, Math.round(p * 100));
+  /** 把上次关页留下的会话接上 File 句柄：同一个文件、同一个键，从已完成的分片之后继续 */
+  function adoptSession(saved, file) {
+    orphanSessions.delete(identOfSession(saved));
+    enqueue(file, saved.album || '', saved);
+    renderResumeBar();
+    const item = queue[queue.length - 1];
+    toast(`续传「${file.name}」：已完成 ${pctOf(item)}%`);
+  }
+
+  // ---------- 并发调度 ----------
+  // 所有（文件的）分片任务进同一个队列，最多 CONCURRENCY 个同时在飞。
+  // 小文件整传是一个任务；大文件的每一片是独立任务 —— 于是「4 个并发」既跨文件也跨分片。
+
+  function partCount(item) {
+    return Math.max(1, Math.ceil(item.file.size / PART_SIZE));
+  }
+
+  /** 已完成的字节 + 在途分片已发出的字节（进度条按这个算，重试时不会突然倒退到 0） */
+  function computeLoaded(item) {
+    let loaded = 0;
+    for (const p of item.parts) loaded += p.size || 0;
+    for (const k in item._inflight) loaded += item._inflight[k] || 0;
+    return Math.min(item.file.size, loaded);
+  }
+
+  function pctOf(item) {
+    if (!item.file || !item.file.size) return 0;
+    return Math.min(100, Math.round((computeLoaded(item) / item.file.size) * 100));
+  }
+
+  function renderItem(item) {
+    if (!item || !item.row) return;
+    const pct = item.state === 'done' ? 100 : pctOf(item);
+    item.pct = pct;
+    if (item.fill) item.fill.style.width = pct + '%';
+    item.row.classList.toggle('paused', item.state === 'paused');
+    item.row.classList.toggle('error', item.state === 'failed');
+    item.row.classList.toggle('done', item.state === 'done');
+
+    const st = item.statusEl;
+    if (st) {
+      st.onclick = null;
+      if (item.state === 'paused') {
+        st.textContent = `已暂停 · ${pct}%`;
+      } else if (item.state === 'failed') {
+        st.textContent = `失败：${item.error || '未知错误'}（点此重试）`;
+        st.onclick = () => retryItem(item);
+      } else if (item.state === 'done') {
+        st.textContent = '完成';
+      } else if (item.preparing) {
+        st.textContent = '建立分片会话…';
+      } else if (item.finishing) {
+        st.textContent = item.thumbPhase ? '生成缩略图…' : '合并分片…';
+      } else if (pct >= 100) {
+        st.textContent = '处理中…';
+      } else if (item.multipart) {
+        st.textContent = `分片 ${item.parts.length}/${partCount(item)} · ${pct}%`;
+      } else {
+        st.textContent = pct + '%';
+      }
+    }
+
+    if (item.pauseBtn) {
+      const pausable = item.state === 'pending' || item.state === 'uploading' || item.state === 'paused';
+      item.pauseBtn.hidden = !pausable || item.finishing;
+      setIcon(item.pauseBtn, item.state === 'paused' ? 'play' : 'pause');
+      item.pauseBtn.title = item.state === 'paused' ? '继续' : '暂停';
+    }
+    if (item.cancelBtn) item.cancelBtn.hidden = item.state === 'done' || item.finishing;
+  }
+
+  function onItemProgress(item) {
+    if (item.state === 'uploading' && !item.finishing && !item.preparing) {
+      const pct = pctOf(item);
       item.pct = pct;
-      fill.style.width = pct + '%';
-      status.textContent = pct >= 100 ? '处理中…' : pct + '%';
-      updateUploadFab();
-    });
+      if (item.fill) item.fill.style.width = pct + '%';
+      if (item.statusEl) {
+        if (pct >= 100) item.statusEl.textContent = '处理中…';
+        else if (item.multipart) item.statusEl.textContent = `分片 ${item.parts.length}/${partCount(item)} · ${pct}%`;
+        else item.statusEl.textContent = pct + '%';
+      }
+    }
+    noteProgress();
+  }
 
-    // 缩略图单独一步：生成或上传失败都不影响原图（D1 里 thumb_key 留空，网格会退回原图）。
-    // 但**要让用户知道**——否则他只会在相册里发现这张图加载特别慢，却不知道为什么。
-    status.textContent = '生成缩略图…';
+  function noteProgress() {
+    scheduleUploadUi();
+    const now = Date.now();
+    if (now - lastSpeedPush < 200) return; // 1 秒滚动窗口，别为每个 progress 事件都记一次
+    lastSpeedPush = now;
+    let bytes = 0;
+    for (const it of queue) {
+      if (it.state === 'pending' || it.state === 'uploading') bytes += computeLoaded(it);
+    }
+    speedSamples.push({ t: now, bytes });
+    while (speedSamples.length > 10) speedSamples.shift();
+  }
+
+  function currentSpeed() {
+    const now = Date.now();
+    const recent = speedSamples.filter((s) => now - s.t <= 1500);
+    if (recent.length < 2) return 0;
+    const a = recent[0];
+    const b = recent[recent.length - 1];
+    const dt = (b.t - a.t) / 1000;
+    if (dt <= 0) return 0;
+    return Math.max(0, (b.bytes - a.bytes) / dt);
+  }
+
+  function fmtSpeed(bps) {
+    return bps > 0 ? fmtBytes(bps) + '/s' : '';
+  }
+
+  function scheduleUploadUi() {
+    if (uiTimer) return;
+    uiTimer = setTimeout(() => { uiTimer = 0; updateUploadFab(); }, 120);
+  }
+
+  function pump() {
+    if (pumpScheduled) return;
+    pumpScheduled = true;
+    queueMicrotask(() => {
+      pumpScheduled = false;
+      pumpNow();
+    });
+  }
+
+  function isTerminal(item) {
+    return !item || item.state === 'paused' || item.state === 'failed'
+      || item.state === 'done' || item.state === 'cancelled';
+  }
+
+  function pumpNow() {
+    while (activeTasks < CONCURRENCY && taskQueue.length) {
+      const task = taskQueue.shift();
+      if (isTerminal(task.item)) continue;
+      activeTasks++;
+      Promise.resolve()
+        .then(() => runTask(task))
+        .catch((e) => handleItemError(task.item, e))
+        .finally(() => {
+          activeTasks--;
+          pump();
+        });
+    }
+    if (!activeTasks && !taskQueue.length) onPoolIdle();
+  }
+
+  function runTask(task) {
+    if (task.type === 'start') return startItem(task.item);
+    if (task.type === 'part') return uploadPartTask(task.item, task.n);
+    return Promise.resolve();
+  }
+
+  function scheduleStart(item) {
+    item.state = 'pending';
+    taskQueue.push({ type: 'start', item });
+    pump();
+  }
+
+  function clearTasksFor(item) {
+    for (let i = taskQueue.length - 1; i >= 0; i--) {
+      if (taskQueue[i].item === item) taskQueue.splice(i, 1);
+    }
+  }
+
+  function abortXhrs(item) {
+    for (const xhr of [...item._xhrs]) {
+      try { xhr.abort(); } catch (e) { /* 已经结束的不用管 */ }
+    }
+    item._xhrs.clear();
+  }
+
+  /** 池子彻底空闲（没有在跑的、没有排队的、也没有上传中的条目）时收尾一次 */
+  function onPoolIdle() {
+    if (activeTasks || taskQueue.length) return;
+    if (queue.some((it) => it.state === 'pending' || it.state === 'uploading')) return;
+    if (dirtyGallery) {
+      dirtyGallery = false;
+      invalidateListCache();
+      if (view === 'admin') loadGallery(true);
+    }
+    // 有图没生成缩略图就说一声：这些图在相册里会直接下载原图，慢得多。
+    // 不提示的话用户只会觉得「怎么有的图特别慢」，查不到原因。
+    if (thumbFailedCount) {
+      const n = thumbFailedCount;
+      thumbFailedCount = 0;
+      toast(`有 ${n} 张图没生成缩略图（格式或尺寸不支持）。可用工具栏的「补缩略图」重试`, true);
+    }
+    scheduleUploadUi();
+  }
+
+  // ---------- 条目状态机 ----------
+
+  async function startItem(item) {
+    if (item.state !== 'pending') return;
+    // 分级沿用「开始传这个文件时」下拉框的值；续传的会话用存下来的值
+    if (!item.rating) item.rating = currentUploadRating();
+    item.state = 'uploading';
+    renderItem(item);
+    scheduleUploadUi();
+
     try {
-      const blob = await makeThumb(file);
+      if (!item.multipart) {
+        // 小文件快路径：单个请求，池子的一个槽
+        const image = await withRetry(() => {
+          item._inflight = { 0: 0 };
+          return uploadOne(item.file, item.album, item.rating, (loaded) => {
+            item._inflight[0] = loaded;
+            onItemProgress(item);
+          }, item);
+        }, item);
+        // 不 await：缩略图那一步不能占着并发槽，否则 4 个槽会被排队等缩略图的文件堵住
+        finishItem(item, image).catch((e) => handleItemError(item, e));
+        return;
+      }
+
+      if (!item.uploadId || !item.key) {
+        item.preparing = true;
+        renderItem(item);
+        const res = await withRetry(() => apiSend('/api/upload/begin', 'POST', {
+          filename: item.file.name,
+          contentType: item.file.type || 'application/octet-stream',
+          size: item.file.size,
+          album: item.album,
+          rating: item.rating,
+        }), item);
+        item.key = res.key;
+        item.uploadId = res.uploadId;
+        item.preparing = false;
+        renderItem(item); // 别让状态一直停在「建立分片会话…」
+        saveUploads(); // 会话一建立就落盘：刷新后能续传，哪怕还没传一片
+        if (item.state === 'cancelled') {
+          // 建立会话期间用户点了取消：把刚建出来的会话清掉，别留孤儿
+          apiSend('/api/upload/abort', 'POST', { key: item.key, uploadId: item.uploadId }).catch(() => {});
+          return;
+        }
+        if (item.state !== 'uploading') { renderItem(item); return; } // 建会话期间被暂停
+      }
+
+      scheduleParts(item);
+    } catch (e) {
+      handleItemError(item, e);
+    } finally {
+      item.preparing = false;
+    }
+  }
+
+  function scheduleParts(item) {
+    if (item.state !== 'uploading') return;
+    const total = partCount(item);
+    const have = new Set(item.parts.map((p) => p.n));
+    const queued = new Set(
+      taskQueue.filter((t) => t.item === item && t.type === 'part').map((t) => t.n)
+    );
+    for (let n = 1; n <= total; n++) {
+      if (!have.has(n) && !queued.has(n)) taskQueue.push({ type: 'part', item, n });
+    }
+    pump();
+    maybeFinish(item);
+  }
+
+  function maybeFinish(item) {
+    if (item.state !== 'uploading' || item.finishing || item.preparing) return;
+    if (item.parts.length < partCount(item)) return;
+    item.finishing = true;
+    item.thumbPhase = false;
+    renderItem(item);
+    scheduleUploadUi();
+    (async () => {
+      try {
+        const image = await withRetry(() => completeMultipart(item), item);
+        await finishItem(item, image);
+      } catch (e) {
+        item.finishing = false;
+        handleItemError(item, e);
+      }
+    })();
+  }
+
+  async function completeMultipart(item) {
+    const parts = [...item.parts]
+      .sort((a, b) => a.n - b.n)
+      .map((p) => ({ partNumber: p.n, etag: p.etag }));
+    const res = await apiSend('/api/upload/complete', 'POST', {
+      key: item.key,
+      uploadId: item.uploadId,
+      filename: item.file.name,
+      contentType: item.file.type || 'application/octet-stream',
+      size: item.file.size, // 服务端用它核对合并后的大小（只传了一部分分片时能发现）
+      album: item.album,
+      rating: item.rating,
+      parts,
+    });
+    return res.image;
+  }
+
+  /**
+   * 传一片。用 XHR 而不是 fetch：分片进度要用 upload.onprogress 读，
+   * fetch 的请求体流式进度在各浏览器上还不可用。
+   */
+  function putPart(item, n) {
+    return new Promise((resolve, reject) => {
+      const start = (n - 1) * PART_SIZE;
+      const end = Math.min(item.file.size, start + PART_SIZE);
+      const blob = item.file.slice(start, end);
+
+      const qs = new URLSearchParams();
+      qs.set('key', item.key);
+      qs.set('uploadId', item.uploadId);
+      qs.set('partNumber', String(n));
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', cfg.api + '/api/upload/part?' + qs.toString());
+      if (cfg.password) xhr.setRequestHeader('x-picbed-key', cfg.password);
+      xhr.setRequestHeader('content-type', 'application/octet-stream');
+
+      let settled = false;
+      const settle = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        item._xhrs.delete(xhr);
+        fn(value);
+      };
+
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        item._inflight[n] = e.loaded;
+        onItemProgress(item);
+      };
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* 可能没有 JSON 体 */ }
+        if (xhr.status >= 200 && xhr.status < 300 && data) return settle(resolve, data);
+        settle(reject, xhrError(xhr, data));
+      };
+      xhr.onerror = () => settle(reject, new Error('网络错误'));
+      xhr.onabort = () => settle(reject, cancelledError());
+      xhr.ontimeout = () => settle(reject, Object.assign(new Error('请求超时'), { status: 408 }));
+      item._inflight[n] = 0; // 重试时别沿用上一次的进度
+      item._xhrs.add(xhr);
+      xhr.send(blob);
+    });
+  }
+
+  async function uploadPartTask(item, n) {
+    if (item.state !== 'uploading') return;
+    item._inflight[n] = 0;
+    try {
+      const data = await withRetry(() => putPart(item, n), item);
+      delete item._inflight[n];
+      item.parts = item.parts.filter((p) => p.n !== n);
+      item.parts.push({ n: data.partNumber, etag: data.etag, size: Number(data.size) || 0 });
+      saveUploads(); // 每成功一片就落盘 —— 断点续传的粒度
+      renderItem(item);
+      scheduleUploadUi();
+      maybeFinish(item);
+    } finally {
+      delete item._inflight[n];
+      noteProgress();
+    }
+  }
+
+  /**
+   * 上传完成后的收尾：生成/上传缩略图、写结果与历史、刷新列表。
+   * 缩略图走 1 槽的 promise 链——4 路并发下同时 decode 大图会内存尖峰。
+   * 任何人都不许在这一步暂停/取消：图片已经在服务端了，再「取消」只会让状态撒谎。
+   */
+  async function finishItem(item, image) {
+    if (!image) { handleItemError(item, new Error('服务端没有返回图片信息')); return; }
+    item.imageId = image.id;
+    item.finishing = true;
+    item.thumbPhase = true;
+    renderItem(item);
+    scheduleUploadUi();
+
+    let thumbOk = false;
+    try {
+      const blob = await queueThumb(() => makeThumb(item.file));
       if (blob) {
         await api('/api/images/' + image.id + '/thumb', {
           method: 'PUT',
           headers: { 'content-type': blob.type || 'image/webp' },
           body: blob,
         });
-        item.thumbOk = true;
+        thumbOk = true;
       }
     } catch (e) {
       console.warn('[picbed] 缩略图没传成：', e.message || e);
     }
+    if (!thumbOk) thumbFailedCount++;
+
+    item.thumbDone = thumbOk;
+    item.finishing = false;
+    item.thumbPhase = false;
+    item.state = 'done';
+    item.pct = 100;
+    item._inflight = {};
+    renderItem(item);
     invalidateListCache(); // 相册里多了一张，缓存那份列表已经旧了
-    return image;
+    dirtyGallery = true;
+    addResult(image.url, item.file.name);
+    saveHistory(image.url, item.file.name);
+    saveUploads(); // done 会被跳过，等于把自己从待续传里删掉
+    scheduleUploadUi();
+
+    setTimeout(() => {
+      if (item.row) item.row.remove();
+      const i = queue.indexOf(item);
+      if (i >= 0) queue.splice(i, 1);
+      updateUploadFab();
+      pump();
+    }, 350);
+    pump(); // 池子可能已经空了：触发列表刷新与缩略图失败的汇总提示
   }
 
-  async function processQueue() {
-    if (processing) return;
-    processing = true;
-    let uploadedAny = false;
-    let thumbFailed = 0;
-    try {
-      for (const item of queue) {
-        if (item.done) continue;
-        item.pct = 0;
-        item.status.textContent = '上传中…';
-        try {
-          const image = await uploadFile(item.file, item);
-          item.done = true;
-          uploadedAny = true;
-          if (!item.thumbOk) thumbFailed++;
-          item.pct = 100;
-          item.fill.style.width = '100%';
-          item.status.textContent = '完成';
-          item.row.classList.add('done');
-          addResult(image.url, item.file.name);
-          saveHistory(image.url, item.file.name);
-          updateUploadFab();
-          await sleep(350);
-          item.row.remove();
-        } catch (e) {
-          console.error('[picbed] 上传失败:', e);
-          item.failed = true;
-          item.status.textContent = '失败：' + errMsg(e) + '（点此重试）';
-          item.row.classList.add('error');
-          item.status.onclick = () => {
-            item.status.onclick = null;
-            item.failed = false;
-            item.status.textContent = '重试中…';
-            item.row.classList.remove('error');
-            updateUploadFab();
-            processQueue();
-          };
-          updateUploadFab();
-        }
-      }
-    } finally {
-      processing = false;
-      updateUploadFab();
-      if (uploadedAny) loadGallery(true);
-      // 有图没生成缩略图就说一声：这些图在相册里会直接下载原图，慢得多。
-      // 不提示的话用户只会觉得「怎么有的图特别慢」，查不到原因。
-      if (thumbFailed) {
-        toast(`有 ${thumbFailed} 张图没生成缩略图（格式或尺寸不支持）。可用工具栏的「补缩略图」重试`, true);
+  function queueThumb(fn) {
+    const run = thumbChain.catch(() => {}).then(fn);
+    thumbChain = run.catch(() => {});
+    return run;
+  }
+
+  // ---------- 重试 / 暂停 / 取消 ----------
+
+  function isRetryable(e) {
+    if (!e || e.cancelled) return false;
+    if (e.status == null) return true; // 网络错误 / 无响应
+    return e.status === 408 || e.status === 429 || e.status >= 500;
+  }
+
+  async function withRetry(fn, item) {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e && e.cancelled) throw e;
+        if (item && (item.state === 'paused' || item.state === 'cancelled')) throw cancelledError();
+        if (!isRetryable(e) || attempt >= PART_RETRIES) throw e;
+        const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
+        attempt++;
+        await sleep(delay);
+        if (item && (item.state === 'paused' || item.state === 'cancelled')) throw cancelledError();
       }
     }
+  }
+
+  function handleItemError(item, e) {
+    if (!item) return;
+    if (item.state === 'paused' || item.state === 'cancelled' || item.state === 'done') return;
+    if (e && e.cancelled) return;
+    console.error('[picbed] 上传失败:', e);
+
+    // 410 = 服务端的 uploadId 已失效（7 天过期 / 被 abort / 分片数据不一致）。
+    // 丢掉会话重新 begin 整传一次；再失效才真正标失败，避免无限重传。
+    if (e && e.status === 410 && !item.restarted) {
+      item.restarted = true;
+      item.key = '';
+      item.uploadId = '';
+      item.parts = [];
+      item._inflight = {};
+      item.finishing = false;
+      // 旧会话的其它在途/排队分片也一起停掉，别继续往一个死会话里灌数据
+      clearTasksFor(item);
+      abortXhrs(item);
+      item.error = '';
+      renderItem(item);
+      saveUploads();
+      toast(`「${item.file.name}」的上传会话已失效，正在重新上传`, true);
+      scheduleStart(item);
+      return;
+    }
+
+    item.finishing = false;
+    item.state = 'failed';
+    item.error = errMsg(e);
+    // 这个条目的其它在途/排队分片也不会成功了，停掉别浪费带宽
+    clearTasksFor(item);
+    abortXhrs(item);
+    item._inflight = {};
+    renderItem(item);
+    saveUploads();
+    scheduleUploadUi();
+  }
+
+  function retryItem(item) {
+    if (item.state !== 'failed') return;
+    item.error = '';
+    item.restarted = false; // 手动重试重置「会话失效后自动重来」的次数
+    renderItem(item);
+    saveUploads();
+    scheduleStart(item);
+    updateUploadFab();
+  }
+
+  function pauseItem(item) {
+    if (item.state !== 'pending' && item.state !== 'uploading') return;
+    if (item.finishing) return; // 已经在合并/生成缩略图，没有可分片暂停的东西了
+    item.state = 'paused';
+    clearTasksFor(item);
+    abortXhrs(item); // 在途分片直接掐掉；下一片会在恢复后重传（R2 按 partNumber 覆盖）
+    item._inflight = {};
+    item.preparing = false;
+    renderItem(item);
+    saveUploads();
+    updateUploadFab();
+  }
+
+  function resumeItem(item) {
+    if (item.state !== 'paused') return;
+    item.state = 'pending';
+    taskQueue.push({ type: 'start', item });
+    renderItem(item);
+    saveUploads();
+    updateUploadFab();
+    pump();
+  }
+
+  function cancelItem(item) {
+    if (!item || item.state === 'done' || item.state === 'cancelled') return;
+    if (item.finishing) { toast('这张图已经传完，正在收尾，无法取消'); return; }
+    item.state = 'cancelled';
+    clearTasksFor(item);
+    abortXhrs(item);
+    if (item.uploadId && item.key) {
+      // 清掉 R2 侧已传的分片；失败也无所谓（会话可能早就过期了）
+      apiSend('/api/upload/abort', 'POST', { key: item.key, uploadId: item.uploadId }).catch(() => {});
+    }
+    if (item.row) item.row.remove();
+    const i = queue.indexOf(item);
+    if (i >= 0) queue.splice(i, 1);
+    saveUploads();
+    updateUploadFab();
+    pump();
+  }
+
+  function pauseAll() {
+    let n = 0;
+    for (const it of [...queue]) {
+      if ((it.state === 'pending' || it.state === 'uploading') && !it.finishing) { pauseItem(it); n++; }
+    }
+    if (n) toast(`已暂停 ${n} 个上传`);
+  }
+
+  function resumeAll() {
+    let n = 0;
+    for (const it of [...queue]) {
+      if (it.state === 'paused') { resumeItem(it); n++; }
+    }
+    if (n) toast(`继续上传 ${n} 个`);
+  }
+
+  // ---------- 会话持久化（localStorage） ----------
+  // 只存「还没传完」的会话。done 即删，结果照旧进 picbed_history。
+
+  function snapItem(item) {
+    return {
+      name: item.file.name,
+      size: item.file.size,
+      lastModified: item.file.lastModified || 0,
+      type: item.file.type || '',
+      album: item.album || '',
+      rating: item.rating || '',
+      key: item.key || '',
+      uploadId: item.uploadId || '',
+      parts: item.parts.map((p) => ({ n: p.n, etag: p.etag, size: p.size || 0 })),
+      state: item.state,
+      error: item.error || '',
+      startedAt: item.startedAt || Date.now(),
+      savedAt: Date.now(),
+    };
+  }
+
+  function saveUploads() {
+    const out = [];
+    for (const it of queue) {
+      // 所有没传完的都留档：包括还没 begin 的（重选文件从头传）和中断的单请求小文件。
+      // done / cancelled 是终态；imageId 一旦有了就说明服务端已经收下，缩略图没传完也不算「待续传」。
+      if (it.state === 'done' || it.state === 'cancelled' || it.imageId) continue;
+      out.push(snapItem(it));
+    }
+    for (const s of orphanSessions.values()) out.push(s);
+    try {
+      localStorage.setItem(UPLOAD_STORE_KEY, JSON.stringify(out));
+    } catch (e) { /* 隐私模式 / 配额满：存不下不影响上传本身 */ }
+  }
+
+  function loadSavedSessions() {
+    let arr = [];
+    try { arr = JSON.parse(localStorage.getItem(UPLOAD_STORE_KEY) || '[]'); } catch (e) { arr = []; }
+    if (!Array.isArray(arr)) arr = [];
+    const now = Date.now();
+    for (const s of arr) {
+      if (!s || !s.name || !(Number(s.size) > 0)) continue;
+      const age = now - (Number(s.startedAt) || Number(s.savedAt) || now);
+      if (age > UPLOAD_SESSION_TTL) continue; // 与 R2 的 7 天未完成自动中止对齐
+      s.parts = (Array.isArray(s.parts) ? s.parts : [])
+        .map((p) => ({ n: Number(p.n || p.partNumber) || 0, etag: p.etag, size: Number(p.size) || 0 }))
+        .filter((p) => p.n > 0 && p.etag);
+      orphanSessions.set(identOfSession(s), s);
+    }
+    saveUploads(); // 顺手把过期条目从 localStorage 里清掉
+    renderResumeBar();
+  }
+
+  function sessionPct(s) {
+    if (!s.size) return 0;
+    let done = 0;
+    for (const p of s.parts || []) {
+      done += Number(p.size) || Math.min(PART_SIZE, s.size - (p.n - 1) * PART_SIZE);
+    }
+    return Math.min(100, Math.round((done / s.size) * 100));
+  }
+
+  function renderResumeBar() {
+    const bar = $('resumeBar');
+    if (!bar) return; // 老版本 HTML 缓存里没有这段
+    const sessions = [...orphanSessions.values()];
+    bar.hidden = !sessions.length;
+    const ul = $('resumeList');
+    ul.textContent = '';
+    if (!sessions.length) { updateUploadFab(); return; }
+    $('resumeCount').textContent = `${sessions.length} 个`;
+    for (const s of sessions) {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'r-name';
+      name.textContent = s.name;
+      name.title = s.name;
+      const meta = document.createElement('span');
+      meta.className = 'r-meta';
+      meta.textContent = `${fmtBytes(s.size)} · ${sessionPct(s)}%`;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'q-act danger';
+      x.title = '放弃这个续传';
+      x.appendChild(icon('x'));
+      x.onclick = () => abandonSession(s);
+      li.append(name, meta, x);
+      ul.appendChild(li);
+    }
+    updateUploadFab();
+  }
+
+  function abandonSession(s) {
+    if (s.uploadId && s.key) {
+      apiSend('/api/upload/abort', 'POST', { key: s.key, uploadId: s.uploadId }).catch(() => {});
+    }
+    orphanSessions.delete(identOfSession(s));
+    saveUploads();
+    renderResumeBar();
+  }
+
+  function abandonAllSessions() {
+    if (!orphanSessions.size) return;
+    for (const s of [...orphanSessions.values()]) {
+      if (s.uploadId && s.key) {
+        apiSend('/api/upload/abort', 'POST', { key: s.key, uploadId: s.uploadId }).catch(() => {});
+      }
+    }
+    orphanSessions.clear();
+    saveUploads();
+    renderResumeBar();
+    toast('已放弃全部待续传');
+  }
+
+  /** 面板徽标/悬浮按钮用的汇总 */
+  function uploadStats() {
+    let active = 0;
+    let paused = 0;
+    let failed = 0;
+    let loaded = 0;
+    let total = 0;
+    for (const it of queue) {
+      if (it.state === 'done' || it.state === 'cancelled') continue;
+      if (it.state === 'failed') { failed++; continue; }
+      loaded += computeLoaded(it);
+      total += it.file.size;
+      if (it.state === 'paused') paused++;
+      else active++;
+    }
+    return { active, paused, failed, loaded, total };
   }
 
   // ---------- 结果 ----------
@@ -2464,29 +3248,48 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
 
   function updateUploadFab() {
-    const uploading = queue.filter((it) => !it.done && !it.failed);
-    const failed = queue.filter((it) => !it.done && it.failed);
-    const hasContent = !!(uploading.length || failed.length || sessionResults.length || history.length);
+    const s = uploadStats();
+    const hasContent = !!(s.active || s.paused || s.failed || orphanSessions.size
+      || sessionResults.length || history.length);
     $('uploadFab').hidden = view !== 'admin' || !hasContent;
-    $('uploadFab').classList.toggle('idle', !uploading.length && !failed.length);
+    $('uploadFab').classList.toggle('idle', !s.active && !s.paused && !s.failed);
+
     const badge = $('fabBadge');
-    if (uploading.length) {
-      const avg = Math.round(uploading.reduce((s, it) => s + (it.pct || 0), 0) / uploading.length);
+    const pauseBtn = $('pauseAllBtn');
+    if (s.active) {
+      // 总百分比按字节算（不是各文件百分比的平均），多个文件并行时才说得通
+      const pct = s.total ? Math.round((s.loaded / s.total) * 100) : 0;
+      const speed = fmtSpeed(currentSpeed());
       badge.className = 'fab-badge';
-      badge.textContent = avg + '%';
-      $('panelBadge').textContent = `上传中 ${uploading.length} 个`;
-    } else if (failed.length) {
+      badge.textContent = pct + '%';
+      $('panelBadge').textContent =
+        `上传中 ${s.active} 个${s.paused ? ` · 暂停 ${s.paused}` : ''} · ${pct}%${speed ? ' · ' + speed : ''}`;
+      if (pauseBtn) { pauseBtn.hidden = false; setLabel(pauseBtn, '暂停全部'); setIcon(pauseBtn, 'pause'); }
+    } else if (s.paused) {
+      badge.className = 'fab-badge idle';
+      badge.textContent = '';
+      $('panelBadge').textContent = `已暂停 ${s.paused} 个`;
+      if (pauseBtn) { pauseBtn.hidden = false; setLabel(pauseBtn, '全部继续'); setIcon(pauseBtn, 'play'); }
+    } else if (s.failed) {
       badge.className = 'fab-badge';
-      badge.textContent = '失败 ' + failed.length;
-      $('panelBadge').textContent = `失败 ${failed.length} 个（点列表中的失败项可重试）`;
+      badge.textContent = '失败 ' + s.failed;
+      $('panelBadge').textContent = `失败 ${s.failed} 个（点列表中的失败项可重试）`;
+      if (pauseBtn) pauseBtn.hidden = true;
+    } else if (orphanSessions.size) {
+      badge.className = 'fab-badge idle';
+      badge.textContent = '';
+      $('panelBadge').textContent = `有待续传 ${orphanSessions.size} 个`;
+      if (pauseBtn) pauseBtn.hidden = true;
     } else if (sessionResults.length) {
       badge.className = 'fab-badge ok';
       badge.textContent = '完成 ' + sessionResults.length;
       $('panelBadge').textContent = `本次已完成 ${sessionResults.length} 个`;
+      if (pauseBtn) pauseBtn.hidden = true;
     } else {
       badge.className = 'fab-badge idle';
       badge.textContent = '';
       $('panelBadge').textContent = '';
+      if (pauseBtn) pauseBtn.hidden = true;
     }
     // 没有可展示的内容时收起面板（不调用 closePanel，避免递归）
     if (!hasContent && panelOpen) {
@@ -5243,6 +6046,15 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // 选择文件与全页拖放上传
   $('uploadBtn').onclick = () => $('fileInput').click();
   $('fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  // 断点续传：把上次没传完的文件重新选一次，靠身份四元组（名称/大小/修改时间/类型）认回来
+  $('resumePickBtn').onclick = () => $('resumeInput').click();
+  $('resumeInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  $('resumeDropBtn').onclick = abandonAllSessions;
+  $('pauseAllBtn').onclick = () => {
+    const s = uploadStats();
+    if (s.active) pauseAll();
+    else if (s.paused) resumeAll();
+  };
   // 文件夹上传：webkitRelativePath 形如 "我的相册/2024/a.jpg"
   $('uploadDirBtn').onclick = () => $('dirInput').click();
   $('dirInput').onchange = (e) => {
@@ -5431,9 +6243,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // 皮肤已经由 <head> 那段脚本贴好了，这里只把菜单上的勾选同步过来
   applySkin(currentSkin(), false);
 
+  loadSavedSessions(); // 上次关页留下的未完成会话 → 面板里的「待续传」条
   renderHistory();
   updateUploadFab();
   switchView(view); // 有密码直接进管理视图，否则先看公开画廊
+  // 有待续传的东西就把上传面板打开，否则用户根本不知道它们还在
+  if (orphanSessions.size) openPanel();
   if (!cfg.api) openSettings();
 })();
 </script>

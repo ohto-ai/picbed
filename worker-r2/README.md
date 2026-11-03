@@ -128,6 +128,10 @@ Account ID 已经写在 `wrangler.toml` 里（它不是密钥），所以 CI 那
 | GET | `https://img.ohtoai.top/<key>` | 无 | 图片直链。**任何状态都能打开**（不经 Worker） |
 | GET | `/api/public/images?album=&rating=&page=&pageSize=` | 公开 | 相册列表，只含可陈列的图。带 CORS |
 | POST | `/api/upload?album=&rating=` | 密码 | 上传。裸 body，文件名放 `X-Filename`（非 ASCII 要 URL 编码）。相册与分级走 **query 参数**：中文相册名在 URL 里天然安全，而且空串能表达「传到根目录」 |
+| POST | `/api/upload/begin` | 密码 | 分片上传第一步。body `{filename, contentType, size, album?, rating?}` → `{key, uploadId}`。相册省略 = 按日期，空串 = 根目录 |
+| PUT | `/api/upload/part?key=&uploadId=&partNumber=` | 密码 | 分片上传：裸 body 传一片（除末片外每片 ≥ 5MiB），返回 `{partNumber, etag, size}`。会话失效回 **410** |
+| POST | `/api/upload/complete` | 密码 | 分片上传最后一步。body `{key, uploadId, filename, contentType, size?, album?, rating?, parts:[{partNumber, etag}]}` → 201 + `{image}`。合并后大小与声明不符回 400 并删对象；对已完成的键重复调用会幂等返回 200 |
+| POST | `/api/upload/abort` | 密码 | 放弃分片会话，清掉 R2 侧已传分片。body `{key, uploadId}` |
 | PUT | `/api/images/:id/thumb` | 密码 | 上传浏览器生成的缩略图（body 是图片字节，Content-Type 决定扩展名）。键由服务端推导 |
 | GET | `/api/images?page=&pageSize=&rating=&hidden=&q=&album=&thumb=` | 密码 | 管理列表，含隐藏与 unspecified。`thumb=missing` 只列还没有缩略图的（批量补全用）。**带 `album=`（哪怕空串）就精确筛该相册，不传才是不筛** |
 | PATCH | `/api/images/:id` | 密码 | body `{is_hidden?, rating?, album?, filename?}` |
@@ -152,6 +156,23 @@ curl -X POST "https://picbed-worker.ohtoai.top/api/upload?rating=G&album=%E6%97%
 ```
 
 （`album=` 省略 = 按日期归档 `YYYY/MM/DD`，给空串 = 传到根目录。中文相册名照常 URL 编码即可。）
+
+### 分片上传（大文件）
+
+`/api/upload` 仍保留给小文件与 `admin.html`（单请求直传）。前端对大文件（> 10MiB）走分片：
+
+1. `POST /api/upload/begin` 建会话 → 拿到服务端生成的 `{key, uploadId}`；
+2. `PUT /api/upload/part` 逐片上传（前端 10MiB 一片、4 片并发），每片是**独立的 HTTP 请求**，
+   所以天然支持并行、暂停与续传；最后一片可以小于 5MiB；
+3. 全部分片成功后 `POST /api/upload/complete` 合并对象并写 D1；
+4. 用户取消时 `POST /api/upload/abort`。
+
+服务端**不保存分片会话状态**：`uploadId` 和已传分片列表由客户端保存（`localStorage`），
+R2 侧未完成的上传**7 天未完成会自动中止**，所以孤儿会话最多占 7 天空间，不需要清理任务。
+`uploadPart` 的 410 表示「会话失效」，前端会丢掉分片状态重新 begin 整传一次。
+分片协议本身支持到约 97GiB（10000 片 × 10MiB），但单文件仍受 `MAX_UPLOAD_BYTES`（95MB）约束 ——
+这是产品上限，不是协议上限，将来想放开只需调大这个变量并同步前端。
+每片仍受 Workers 免费版 100MB 请求体上限约束，10MiB 留足了余量。
 
 **鉴权**：管理接口用共享密码（请求头 `x-picbed-key`，对应 `wrangler secret` 里的 `PICBED_PASSWORD`）。
 没设密码时管理接口一律 **503**，不会放行。公开的相册接口不需要密码。

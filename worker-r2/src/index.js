@@ -3,7 +3,11 @@
  *
  * 这个 Worker 负责（带密码的都要求 x-picbed-key 头）：
  *   /admin                  管理页（HTML 由 Text 模块打进 Worker，不需要额外部署静态站）
- *   /api/upload             上传（POST）
+ *   /api/upload             上传（POST，小文件单请求）
+ *   /api/upload/begin       分片上传：建立会话（POST）
+ *   /api/upload/part        分片上传：传一片（PUT）
+ *   /api/upload/complete    分片上传：合并并落库（POST）
+ *   /api/upload/abort       分片上传：放弃会话（POST）
  *   /api/transfer           抓远程图片转存（POST）
  *   /api/images             管理列表（GET）
  *   /api/images/:id         改隐藏 / 改分级 / 改名 / 改相册（PATCH）、删除（DELETE）
@@ -26,6 +30,10 @@ import {
   jsonErr,
   requireAuth,
   handleUpload,
+  handleUploadBegin,
+  handleUploadPart,
+  handleUploadComplete,
+  handleUploadAbort,
   handleAdminList,
   handleAlbums,
   handleUpdate,
@@ -186,6 +194,14 @@ export default {
           else res = jsonErr(405, '只支持 PATCH / DELETE');
         } else if (pathname === '/api/upload' && method === 'POST') {
           res = await handleUpload(request, env);
+        } else if (pathname === '/api/upload/begin' && method === 'POST') {
+          res = await handleUploadBegin(request, env);
+        } else if (pathname === '/api/upload/part' && method === 'PUT') {
+          res = await handleUploadPart(request, url, env);
+        } else if (pathname === '/api/upload/complete' && method === 'POST') {
+          res = await handleUploadComplete(request, env);
+        } else if (pathname === '/api/upload/abort' && method === 'POST') {
+          res = await handleUploadAbort(request, env);
         } else if (pathname === '/api/transfer' && method === 'POST') {
           res = await handleTransfer(request, env);
         } else if (pathname === '/api/images' && method === 'GET') {
@@ -225,6 +241,10 @@ export default {
           endpoints: [
             'GET  /admin',
             'POST /api/upload',
+            'POST /api/upload/begin',
+            'PUT  /api/upload/part',
+            'POST /api/upload/complete',
+            'POST /api/upload/abort',
             'POST /api/transfer',
             'GET  /api/images',
             'PUT  /api/images/:id/thumb',
