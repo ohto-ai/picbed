@@ -236,7 +236,12 @@ function validStorageKey(env, key) {
  * 其它（R2 短暂故障、网络等）回 502，客户端会按普通可重试错误退避重试，不会白扔已传分片。
  */
 function isMissingUploadError(e) {
-  return /does not exist|NoSuchUpload|not found|10024/i.test(String((e && e.message) || e || ''));
+  // 只认「整个 multipart 会话不存在」（10024 / NoSuchUpload）。
+  // 10025（某个分片找不到）说明会话还在、只是 ETag 对不上，应该按普通错误重试/报错，
+  // 而不是让客户端整传重来 —— 那会制造第二个会话，分片反而更容易混。
+  const msg = String((e && e.message) || e || '');
+  if (/10025/i.test(msg)) return false;
+  return /does not exist|NoSuchUpload|10024/i.test(msg);
 }
 
 /**

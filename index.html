@@ -2091,8 +2091,16 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   const UPLOAD_SESSION_TTL = 7 * 86400000;
 
   const queue = [];                 // 本页正在进行的上传（含暂停/失败）
-  const taskQueue = [];             // 待执行的池任务：{type:'start'|'part', item, n}
+  // 任务池分两级：分片/小文件整传是真正在传字节的，优先；建会话（begin）只是元数据，排后面。
+  // 否则一次选几百个文件时，几百个 begin 会把所有分片任务饿死 —— 表现就是「一直 0%」。
+  const partQueue = [];             // 高优先级：{type:'part', item, n} 或 {type:'whole', item}
+  const startQueue = [];            // 低优先级：{type:'start', item}（建会话 / 分流）
   const orphanSessions = new Map(); // 上次关页留下的会话（还没有 File 句柄）：ident → session
+
+  // 队列行的预览图：直接解码原图，几百张 40MB 截图会当场把主线程压死。
+  // 只给小图、且只给队列里前一小批做预览，其余留灰底占位（真正的缩略图在传完后生成）。
+  const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+  const PREVIEW_MAX_COUNT = 16;
 
   let activeTasks = 0;
   let pumpScheduled = false;
@@ -2103,6 +2111,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   let speedSamples = [];
   let lastSpeedPush = 0;
   let uiTimer = 0;
+  let uploadsSaveTimer = 0;
 
   function fmtBytes(n) {
     n = Number(n) || 0;
@@ -2377,10 +2386,16 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     actions.append(pauseBtn, cancelBtn);
 
     row.append(thumb, body, actions);
-    if (URL.createObjectURL) {
+    // 队列行缩略图用的是**原图**（object URL）。批量上传大图时不预览，避免一次解码几百 MB。
+    const previewsInUse = queue.reduce((n, it) => n + (it.hasPreview ? 1 : 0), 0);
+    if (URL.createObjectURL && file.size <= PREVIEW_MAX_BYTES && previewsInUse < PREVIEW_MAX_COUNT) {
+      item.hasPreview = true;
       const u = URL.createObjectURL(file);
+      thumb.decoding = 'async';
       thumb.src = u;
       thumb.onload = () => URL.revokeObjectURL(u);
+    } else {
+      thumb.title = '大图暂不预览';
     }
     $('queue').appendChild(row);
 
@@ -2409,7 +2424,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       parts: [],
       _inflight: {},
       _xhrs: new Set(),
+      _activeParts: new Set(),
       multipart: file.size > MULTIPART_THRESHOLD,
+      starting: false,
       preparing: false,
       finishing: false,
       thumbPhase: false,
@@ -2565,10 +2582,23 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       || item.state === 'done' || item.state === 'cancelled';
   }
 
+  /** 取下一个任务：先分片/整传，再建会话 —— 保证「已经开始的文件」持续有进度 */
+  function nextTask() {
+    while (partQueue.length) {
+      const t = partQueue.shift();
+      if (!isTerminal(t.item)) return t;
+    }
+    while (startQueue.length) {
+      const t = startQueue.shift();
+      if (!isTerminal(t.item)) return t;
+    }
+    return null;
+  }
+
   function pumpNow() {
-    while (activeTasks < CONCURRENCY && taskQueue.length) {
-      const task = taskQueue.shift();
-      if (isTerminal(task.item)) continue;
+    while (activeTasks < CONCURRENCY) {
+      const task = nextTask();
+      if (!task) break;
       activeTasks++;
       Promise.resolve()
         .then(() => runTask(task))
@@ -2578,24 +2608,28 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
           pump();
         });
     }
-    if (!activeTasks && !taskQueue.length) onPoolIdle();
+    if (!activeTasks && !partQueue.length && !startQueue.length) onPoolIdle();
   }
 
   function runTask(task) {
     if (task.type === 'start') return startItem(task.item);
     if (task.type === 'part') return uploadPartTask(task.item, task.n);
+    if (task.type === 'whole') return runWholeUpload(task.item);
     return Promise.resolve();
   }
 
   function scheduleStart(item) {
     item.state = 'pending';
-    taskQueue.push({ type: 'start', item });
+    startQueue.push({ type: 'start', item });
     pump();
   }
 
   function clearTasksFor(item) {
-    for (let i = taskQueue.length - 1; i >= 0; i--) {
-      if (taskQueue[i].item === item) taskQueue.splice(i, 1);
+    for (let i = partQueue.length - 1; i >= 0; i--) {
+      if (partQueue[i].item === item) partQueue.splice(i, 1);
+    }
+    for (let i = startQueue.length - 1; i >= 0; i--) {
+      if (startQueue[i].item === item) startQueue.splice(i, 1);
     }
   }
 
@@ -2608,7 +2642,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   /** 池子彻底空闲（没有在跑的、没有排队的、也没有上传中的条目）时收尾一次 */
   function onPoolIdle() {
-    if (activeTasks || taskQueue.length) return;
+    if (activeTasks || partQueue.length || startQueue.length) return;
     if (queue.some((it) => it.state === 'pending' || it.state === 'uploading')) return;
     if (dirtyGallery) {
       dirtyGallery = false;
@@ -2629,6 +2663,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   async function startItem(item) {
     if (item.state !== 'pending') return;
+    // 同一个条目同一时刻只允许一个 start 在跑。否则「begin 还在飞时暂停再恢复」
+    // 会再发一个 begin，两个分片会话的 key/ETag 混在一起，complete 必然失败。
+    if (item.starting) return;
+    item.starting = true;
     // 分级沿用「开始传这个文件时」下拉框的值；续传的会话用存下来的值
     if (!item.rating) item.rating = currentUploadRating();
     item.state = 'uploading';
@@ -2637,16 +2675,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
     try {
       if (!item.multipart) {
-        // 小文件快路径：单个请求，池子的一个槽
-        const image = await withRetry(() => {
-          item._inflight = { 0: 0 };
-          return uploadOne(item.file, item.album, item.rating, (loaded) => {
-            item._inflight[0] = loaded;
-            onItemProgress(item);
-          }, item);
-        }, item);
-        // 不 await：缩略图那一步不能占着并发槽，否则 4 个槽会被排队等缩略图的文件堵住
-        finishItem(item, image).catch((e) => handleItemError(item, e));
+        // 小文件整传是「真正在传字节」的活，放进高优先级队列；start 任务立刻让出槽位，
+        // 这样一次加入很多文件时，不会让后面的 begin 把前面的整传任务压住。
+        partQueue.push({ type: 'whole', item });
+        pump();
         return;
       }
 
@@ -2670,15 +2702,34 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
           apiSend('/api/upload/abort', 'POST', { key: item.key, uploadId: item.uploadId }).catch(() => {});
           return;
         }
-        if (item.state !== 'uploading') { renderItem(item); return; } // 建会话期间被暂停
+        if (item.state === 'paused') { renderItem(item); return; }
+        // 建会话期间被暂停又恢复：resumeItem 已经把状态改回 pending，这里接着往下走，
+        // 不再发第二个 begin（新的 start 任务会被 item.starting 挡住）。
+        if (item.state === 'pending') item.state = 'uploading';
+        if (item.state !== 'uploading') { renderItem(item); return; }
       }
 
       scheduleParts(item);
     } catch (e) {
       handleItemError(item, e);
     } finally {
+      item.starting = false;
       item.preparing = false;
     }
+  }
+
+  /** 小文件整传：一个请求，占池子的一个槽（由 partQueue 调度） */
+  async function runWholeUpload(item) {
+    if (item.state !== 'uploading') return;
+    const image = await withRetry(() => {
+      item._inflight = { 0: 0 };
+      return uploadOne(item.file, item.album, item.rating, (loaded) => {
+        item._inflight[0] = loaded;
+        onItemProgress(item);
+      }, item);
+    }, item);
+    // 不 await：缩略图那一步不能占着并发槽，否则 4 个槽会被排队等缩略图的文件堵住
+    finishItem(item, image).catch((e) => handleItemError(item, e));
   }
 
   function scheduleParts(item) {
@@ -2686,10 +2737,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     const total = partCount(item);
     const have = new Set(item.parts.map((p) => p.n));
     const queued = new Set(
-      taskQueue.filter((t) => t.item === item && t.type === 'part').map((t) => t.n)
+      partQueue.filter((t) => t.item === item && t.type === 'part').map((t) => t.n)
     );
     for (let n = 1; n <= total; n++) {
-      if (!have.has(n) && !queued.has(n)) taskQueue.push({ type: 'part', item, n });
+      if (!have.has(n) && !queued.has(n) && !item._activeParts.has(n)) {
+        partQueue.push({ type: 'part', item, n });
+      }
     }
     pump();
     maybeFinish(item);
@@ -2734,15 +2787,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
    * 传一片。用 XHR 而不是 fetch：分片进度要用 upload.onprogress 读，
    * fetch 的请求体流式进度在各浏览器上还不可用。
    */
-  function putPart(item, n) {
+  function putPart(item, n, key, uploadId) {
     return new Promise((resolve, reject) => {
       const start = (n - 1) * PART_SIZE;
       const end = Math.min(item.file.size, start + PART_SIZE);
       const blob = item.file.slice(start, end);
 
       const qs = new URLSearchParams();
-      qs.set('key', item.key);
-      qs.set('uploadId', item.uploadId);
+      // 用发起这一片时捕获的会话，而不是响应回来时的 item.key ——
+      // 期间如果重组过会话，这一片的响应属于旧会话，不能记到新会话头上。
+      qs.set('key', key);
+      qs.set('uploadId', uploadId);
       qs.set('partNumber', String(n));
 
       const xhr = new XMLHttpRequest();
@@ -2779,11 +2834,17 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   }
 
   async function uploadPartTask(item, n) {
-    if (item.state !== 'uploading') return;
+    if (item.state !== 'uploading' || item._activeParts.has(n)) return;
+    const key = item.key;
+    const uploadId = item.uploadId;
+    item._activeParts.add(n);
     item._inflight[n] = 0;
     try {
-      const data = await withRetry(() => putPart(item, n), item);
+      const data = await withRetry(() => putPart(item, n, key, uploadId), item);
       delete item._inflight[n];
+      // 会话在等待期间变了（410 重组）或条目被取消：这一片的 ETag 属于旧会话，直接丢掉
+      if (item.state === 'cancelled') return;
+      if (item.key !== key || item.uploadId !== uploadId) return;
       item.parts = item.parts.filter((p) => p.n !== n);
       item.parts.push({ n: data.partNumber, etag: data.etag, size: Number(data.size) || 0 });
       saveUploads(); // 每成功一片就落盘 —— 断点续传的粒度
@@ -2792,6 +2853,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       maybeFinish(item);
     } finally {
       delete item._inflight[n];
+      item._activeParts.delete(n);
       noteProgress();
     }
   }
@@ -2898,6 +2960,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       // 旧会话的其它在途/排队分片也一起停掉，别继续往一个死会话里灌数据
       clearTasksFor(item);
       abortXhrs(item);
+      item._activeParts = new Set();
       item.error = '';
       renderItem(item);
       saveUploads();
@@ -2935,6 +2998,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     clearTasksFor(item);
     abortXhrs(item); // 在途分片直接掐掉；下一片会在恢复后重传（R2 按 partNumber 覆盖）
     item._inflight = {};
+    item._activeParts = new Set();
     item.preparing = false;
     renderItem(item);
     saveUploads();
@@ -2943,12 +3007,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
 
   function resumeItem(item) {
     if (item.state !== 'paused') return;
-    item.state = 'pending';
-    taskQueue.push({ type: 'start', item });
+    scheduleStart(item);
     renderItem(item);
     saveUploads();
     updateUploadFab();
-    pump();
   }
 
   function cancelItem(item) {
@@ -3006,7 +3068,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     };
   }
 
-  function saveUploads() {
+  function writeUploadsNow() {
     const out = [];
     for (const it of queue) {
       // 所有没传完的都留档：包括还没 begin 的（重选文件从头传）和中断的单请求小文件。
@@ -3019,6 +3081,30 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       localStorage.setItem(UPLOAD_STORE_KEY, JSON.stringify(out));
     } catch (e) { /* 隐私模式 / 配额满：存不下不影响上传本身 */ }
   }
+
+  /**
+   * 落盘会序列化整个会话表。批量上传几百个文件时，每个分片完成都全量写一遍是 O(n²)，
+   * 主线程会被 localStorage 的同步写拖慢。这里合并到 500ms 一次；页面隐藏时立刻补写。
+   */
+  function saveUploads() {
+    if (uploadsSaveTimer) return;
+    uploadsSaveTimer = setTimeout(() => {
+      uploadsSaveTimer = 0;
+      writeUploadsNow();
+    }, 500);
+  }
+
+  function flushUploads() {
+    if (!uploadsSaveTimer) return;
+    clearTimeout(uploadsSaveTimer);
+    uploadsSaveTimer = 0;
+    writeUploadsNow();
+  }
+
+  window.addEventListener('pagehide', flushUploads);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushUploads();
+  });
 
   function loadSavedSessions() {
     let arr = [];
