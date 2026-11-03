@@ -5,3 +5,4 @@ __pycache__/
 .dev.vars
 seed/
 *-lsjson.json
+.zcode/

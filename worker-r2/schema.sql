@@ -14,8 +14,9 @@
 
 CREATE TABLE IF NOT EXISTS images (
   id          INTEGER PRIMARY KEY,            -- 主键（SQLite 里 INTEGER PRIMARY KEY 自增，无需 AUTOINCREMENT）
-  r2_key      TEXT    NOT NULL UNIQUE,        -- R2 中的完整键，如 img/2026/10/03/120000_ab12cd.jpg
-  filename    TEXT    NOT NULL,               -- 原始文件名（仅展示用，键里带的是净化后的名字）
+  r2_key      TEXT    NOT NULL UNIQUE,        -- R2 中的完整键。新上传是内容寻址：img/<sha256>.<ext>；
+                                              -- 旧键是 img/YYYY/MM/DD/时分秒_8位随机.ext，同样不透明不可变
+  filename    TEXT    NOT NULL,               -- 原始文件名（仅展示用，键里不带名字）
   mime        TEXT,                           -- 上传时写进 R2 对象的 httpMetadata，直链的 Content-Type
   size        INTEGER,                        -- 字节数
   is_hidden   INTEGER NOT NULL DEFAULT 0 CHECK (is_hidden IN (0, 1)),
@@ -26,7 +27,10 @@ CREATE TABLE IF NOT EXISTS images (
                                               -- 相册可以随时改，两者刻意解耦（移动/改名不产生新的直链）
   thumb_key   TEXT,                           -- 缩略图在 R2 里的键；NULL = 没有缩略图，前端退回原图
   uploaded_at TEXT    NOT NULL,               -- ISO8601 UTC，如 2026-10-03T12:00:00Z
-  updated_at  TEXT                            -- 最后一次改 is_hidden / rating / album / filename / thumb_key 的时间
+  updated_at  TEXT,                           -- 最后一次改 is_hidden / rating / album / filename / thumb_key 的时间
+  sha256      TEXT                            -- 内容指纹（十六进制）。同内容只保留一条记录：
+                                              -- 上传查重、并发竞态兜底都靠它的唯一索引；老图由
+                                              -- scripts/backfill-dedup.mjs 回填，NULL = 还没算过
 );
 
 -- 相册接口的热路径：
@@ -43,3 +47,8 @@ CREATE INDEX IF NOT EXISTS idx_images_album ON images (album, is_hidden, rating,
 -- id 也要进索引：批量上传的图 uploaded_at 常常同秒，光靠时间排序不稳定（翻页会重复/漏图），
 -- 而带上 id 当第二排序键后，索引能直接提供排序，不用再建临时 B 树把整个索引读一遍。
 CREATE INDEX IF NOT EXISTS idx_images_uploaded_at ON images (uploaded_at DESC, id DESC);
+
+-- 内容查重用：WHERE sha256 = ?（上传 begin / 单传入口）。部分索引（NULL 不入索引），
+-- 老图回填前 sha256 是 NULL，普通唯一索引会因「多个 NULL」建不起来也没意义。
+-- 唯一性同时是并发上传同一内容的竞态兜底：谁后插谁撞，撞的人采用既有行。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_images_sha256 ON images (sha256) WHERE sha256 IS NOT NULL;

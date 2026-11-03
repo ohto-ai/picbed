@@ -150,25 +150,40 @@ export function dateAlbum() {
  *
  * 键是**不透明且不可变**的：相册名不参与其中（相册是数据库里的一列，随便改都不影响直链）。
  * 与旧站保持同样的前缀和日期目录形状，迁移过来的键不用改。
+ *
+ * 带 sha256 时改走内容寻址：<PREFIX>/<sha256>.<ext> —— 同内容永远同键，
+ * 就算查重漏网（比如老库还没回填），同键 put 也是覆盖同一对象，存储层天然幂等。
+ * 64 位十六进制比原来的 8 位随机更不可猜，直链反而更安全。
  */
-function makeKey(env, filename, contentType) {
+function makeKey(env, filename, contentType, sha256) {
   const prefix = String(env.PREFIX || 'img').replace(/^\/+|\/+$/g, '') || 'img';
-
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const dateDir = dateAlbum();
-  const time = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
 
   const name = String(filename || '');
   let ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
   if (!/^[a-z0-9]{2,8}$/.test(ext)) ext = '';
   ext = ext || EXT_BY_TYPE[contentType] || 'bin';
 
+  if (sha256) return `${prefix}/${sha256}.${ext}`;
+
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const dateDir = dateAlbum();
+  const time = `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
+
   // 键里刻意不放原始文件名（与旧站一致）：省掉一整套 URL 编码/转义问题，
   // 也不会把用户的文件名暴露在 URL 上。原始名完整存在 D1 的 filename 列里，管理页照常显示。
   //
   // 随机部分用 4 字节（8 位十六进制）：直链是公开的，键别太好猜。
   return `${prefix}/${dateDir}/${time}_${randHex(4)}.${ext}`;
+}
+
+/**
+ * 客户端声明的内容指纹（可选参数）：64 位小写十六进制。
+ * 传了才参与查重与键生成；格式不对就当没传（静默降级成老逻辑，不让上传失败）。
+ */
+function normSha256(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(s) ? s : '';
 }
 
 /** 缩略图扩展名跟着 Content-Type 走：浏览器的 toBlob 在不支持 WebP 时会静默退回 PNG */
@@ -310,9 +325,28 @@ export function shape(row, env) {
 }
 
 /**
+ * 落库，并处理「并发上传同一内容」的竞态：sha256 上有唯一索引，谁后插谁撞。
+ * 撞了就把既有行当结果返回；本次传的对象只在键不同时才删 ——
+ * 键相同说明和既有行指向同一个对象（同哈希同键），删了会把人家也删没。
+ */
+async function insertDedup(env, row) {
+  try {
+    const id = await db.insertImage(env, row);
+    return { image: shape({ id, ...row }, env), existed: false };
+  } catch (e) {
+    const msg = String((e && e.message) || e || '');
+    if (!row.sha256 || !msg.includes('UNIQUE constraint failed: images.sha256')) throw e;
+    const existing = await db.getImageBySha(env, row.sha256).catch(() => null);
+    if (!existing) throw e; // 撞的不是 sha256（理论上不会），按原错误走
+    if (existing.r2_key !== row.r2_key) await env.BUCKET.delete(row.r2_key).catch(() => {});
+    return { image: shape(existing, env), existed: true };
+  }
+}
+
+/**
  * POST /api/upload
  * 裸 body 上传；文件名放 X-Filename（非 ASCII 要 URL 编码），
- * 可选 query 参数 `?rating=` 与 `?album=`。
+ * 可选 query 参数 `?rating=` 与 `?album=`，可选头 `x-sha256`（内容指纹，传了就查重）。
  */
 export async function handleUpload(request, env) {
   const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
@@ -326,6 +360,14 @@ export async function handleUpload(request, env) {
   const filename = normFilename(headerText(request, 'x-filename'));
 
   const contentType = normContentType(request.headers.get('content-type'));
+  const sha256 = normSha256(request.headers.get('x-sha256'));
+
+  // 查重在**读 body 之前**：同内容已经在库里，就一个字节都不用传。
+  // 命中时请求体没被消费也没关系 —— 返回响应后连接照常收尾。
+  if (sha256) {
+    const existing = await db.getImageBySha(env, sha256).catch(() => null);
+    if (existing) return jsonAdmin({ image: shape(existing, env), exists: true });
+  }
 
   // 分级和相册走 query 参数（`?rating=&album=`）。为什么不用请求头：
   //   1. HTTP 头只能放 Latin-1，中文相册名得先 URL 编码再由服务端解回来，绕；
@@ -339,7 +381,7 @@ export async function handleUpload(request, env) {
   const album = normAlbum(q.has('album') ? q.get('album') : undefined, env);
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
-  const key = makeKey(env, filename, contentType);
+  const key = makeKey(env, filename, contentType, sha256);
 
   let size;
   try {
@@ -359,18 +401,23 @@ export async function handleUpload(request, env) {
     rating,
     album,
     uploaded_at: db.nowIso(),
+    sha256: sha256 || null,
   };
 
-  let id;
   try {
-    id = await db.insertImage(env, row);
+    const { image, existed } = await insertDedup(env, row);
+    if (existed) {
+      // 并发同内容竞态：对象可能刚被我们覆盖过（同键同字节，无损），库里用既有行
+      return jsonAdmin({ image, exists: true });
+    }
+    return jsonAdmin({ image }, 201);
   } catch (e) {
-    // 元数据没写成就把对象删掉，不留孤儿
-    await env.BUCKET.delete(key).catch(() => {});
+    // 元数据没写成就把对象删掉，不留孤儿；但既有行若正引用这个键（同哈希同键的
+    // 并发上传），删了会把人家也删没 —— 那就留着，顶多剩个无记录的对象。
+    const ref = await db.getImageByKey(env, key).catch(() => null);
+    if (!ref) await env.BUCKET.delete(key).catch(() => {});
     return jsonErr(500, '元数据写入失败：' + (e && e.message ? e.message : e));
   }
-
-  return jsonAdmin({ image: shape({ id, ...row }, env) }, 201);
 }
 
 // ---------- 分片上传（大文件） ----------
@@ -394,12 +441,19 @@ export async function handleUploadBegin(request, env) {
 
   const filename = normFilename(body.filename);
   const contentType = normContentType(body.contentType);
+  const sha256 = normSha256(body.sha256);
   // 相册/分级真正落库在 complete；这里先把能提前发现的问题（保留名）挡掉，
   // 免得用户白传 90MB 之后才拿到 400。
   const album = normAlbum(body.album, env);
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
-  const key = makeKey(env, filename, contentType);
+  // 查重放在建会话之前：同内容已经在库里，就别开分片会话了，一个字节都不用传。
+  if (sha256) {
+    const existing = await db.getImageBySha(env, sha256).catch(() => null);
+    if (existing) return jsonAdmin({ image: shape(existing, env), exists: true });
+  }
+
+  const key = makeKey(env, filename, contentType, sha256);
   try {
     const upload = await env.BUCKET.createMultipartUpload(key, {
       httpMetadata: imageHttpMetadata(env, contentType),
@@ -496,6 +550,7 @@ export async function handleUploadComplete(request, env) {
   const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
   const filename = normFilename(body.filename);
   const contentType = normContentType(body.contentType);
+  const sha256 = normSha256(body.sha256);
   const rating = normRating(body.rating, env);
   const album = normAlbum(body.album, env);
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
@@ -534,6 +589,17 @@ export async function handleUploadComplete(request, env) {
     return jsonErr(413, `文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`);
   }
 
+  // begin 到 complete 之间可能有并发上传抢先落了库（同内容）：直接采用既有行，
+  // 不再插第二条。自己这份对象只在键不同时才删 —— 键相同说明指向同一个对象
+  // （同哈希同键，可能正是我们刚合并出来的），删了会把既有行也删没。
+  if (sha256) {
+    const existing = await db.getImageBySha(env, sha256).catch(() => null);
+    if (existing) {
+      if (existing.r2_key !== key) await env.BUCKET.delete(key).catch(() => {});
+      return jsonAdmin({ image: shape(existing, env), exists: true });
+    }
+  }
+
   const row = {
     r2_key: key,
     filename,
@@ -543,13 +609,18 @@ export async function handleUploadComplete(request, env) {
     rating,
     album,
     uploaded_at: db.nowIso(),
+    sha256: sha256 || null,
   };
 
   try {
-    const id = await db.insertImage(env, row);
-    return jsonAdmin({ image: shape({ id, ...row }, env) }, 201);
+    const { image, existed } = await insertDedup(env, row);
+    if (existed) return jsonAdmin({ image, exists: true });
+    return jsonAdmin({ image }, 201);
   } catch (e) {
-    await env.BUCKET.delete(key).catch(() => {});
+    // 元数据没写成就把对象删掉，不留孤儿；但既有行若正引用这个键（同哈希同键的
+    // 并发上传），删了会把人家也删没 —— 那就留着，顶多剩个无记录的对象。
+    const ref = await db.getImageByKey(env, key).catch(() => null);
+    if (!ref) await env.BUCKET.delete(key).catch(() => {});
     return jsonErr(500, '元数据写入失败：' + (e && e.message ? e.message : e));
   }
 }

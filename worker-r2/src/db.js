@@ -12,7 +12,7 @@
 import { listableSql } from './access.js';
 
 /** 查询用到的列（顺序固定，方便复用） */
-const COLS = 'id, r2_key, filename, mime, size, is_hidden, rating, album, thumb_key, uploaded_at, updated_at';
+const COLS = 'id, r2_key, filename, mime, size, is_hidden, rating, album, thumb_key, uploaded_at, updated_at, sha256';
 
 /** id 列表分块大小：D1 单语句上限 100 个绑定参数，留点余量给其它占位符 */
 const CHUNK = 90;
@@ -54,10 +54,13 @@ function escapeLike(s) {
  */
 export async function insertImage(env, img) {
   const res = await env.DB.prepare(
-    `INSERT INTO images (r2_key, filename, mime, size, is_hidden, rating, album, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO images (r2_key, filename, mime, size, is_hidden, rating, album, uploaded_at, sha256)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(img.r2_key, img.filename, img.mime, img.size, img.is_hidden, img.rating, img.album, img.uploaded_at)
+    .bind(
+      img.r2_key, img.filename, img.mime, img.size, img.is_hidden, img.rating, img.album,
+      img.uploaded_at, img.sha256 || null
+    )
     .run();
   return res.meta.last_row_id;
 }
@@ -134,6 +137,16 @@ export async function getImageById(env, id) {
  */
 export async function getImageByKey(env, key) {
   return await env.DB.prepare(`SELECT ${COLS} FROM images WHERE r2_key = ?`).bind(key).first();
+}
+
+/**
+ * 按内容哈希取一条。
+ * 上传查重用：begin / 单传阶段拿到同样的 SHA-256 就直接返回既有记录，
+ * 一个字节都不用传（键就是哈希本身，同内容永远同键）。
+ * 唯一索引（idx_images_sha256）保证最多命中一条，也是并发上传同内容的竞态兜底。
+ */
+export async function getImageBySha(env, sha256) {
+  return await env.DB.prepare(`SELECT ${COLS} FROM images WHERE sha256 = ?`).bind(sha256).first();
 }
 
 /** 按 id 批量取（删除前要先拿到 r2_key） */

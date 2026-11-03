@@ -2111,6 +2111,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   let thumbChain = Promise.resolve(); // 缩略图解码串行：4 路并发解码会内存尖峰
   let dirtyGallery = false;
   let thumbFailedCount = 0;
+  let dedupCount = 0; // 本次会话里「与已有图同内容、复用既有记录」的张数（池子空闲时汇总提示）
   let speedSamples = [];
   let lastSpeedPush = 0;
   let uiTimer = 0;
@@ -2327,6 +2328,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (cfg.password) xhr.setRequestHeader('x-picbed-key', cfg.password);
       xhr.setRequestHeader('x-filename', encodeURIComponent(file.name)); // 头只能放 Latin-1，中文名要先编码
       xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+      if (item && item.sha256) xhr.setRequestHeader('x-sha256', item.sha256); // 服务端按它查重
       // 超时按文件大小伸缩（50KB/s 下限折算；95MB ≈ 33 分钟）：挂死的连接不能无限占着并发槽。
       // 408 在 isRetryable 白名单里，超时会接通现有重试链。
       xhr.timeout = Math.max(60000, Math.round(file.size / 50));
@@ -2343,7 +2345,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       xhr.onload = () => {
         let data = null;
         try { data = JSON.parse(xhr.responseText); } catch (e) { /* 可能没有 JSON 体 */ }
-        if (xhr.status >= 200 && xhr.status < 300 && data && data.image) return settle(resolve, data.image);
+        // resolve 的是整个响应体：exists 标记（命中查重复用了既有图）由调用方识别
+        if (xhr.status >= 200 && xhr.status < 300 && data && data.image) return settle(resolve, data);
         settle(reject, xhrError(xhr, data));
       };
       xhr.onerror = () => settle(reject, new Error('网络错误'));
@@ -2430,6 +2433,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       state: 'pending',
       key: (saved && saved.key) || '',
       uploadId: (saved && saved.uploadId) || '',
+      sha256: (saved && saved.sha256) || '', // 续传带上存好的指纹，免得重算一遍
       parts: [],
       _inflight: {},
       _xhrs: new Set(),
@@ -2437,6 +2441,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       multipart: file.size > MULTIPART_THRESHOLD,
       starting: false,
       preparing: false,
+      hashing: false,
       finishing: false,
       thumbPhase: false,
       restarted: false,
@@ -2453,10 +2458,34 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     }
     buildRow(item);
     queue.push(item);
+    if (!item.sha256) startHashing(item);
     scheduleStart(item);
     saveUploads();
     updateUploadFab();
     return item;
+  }
+
+  // ---------- 内容指纹（SHA-256） ----------
+  // 键就是哈希本身（服务端内容寻址），所以上传前先算指纹：begin 阶段服务端一查
+  // 哈希已存在就直接复用既有图，一个字节都不用传。
+  // 串行链：subtle.digest 需要整块 buffer，几张大图同时 arrayBuffer 会叠加吃内存。
+  let hashChain = Promise.resolve();
+
+  function startHashing(item) {
+    item.hashing = true;
+    const run = hashChain.catch(() => {}).then(async () => {
+      const buf = await item.file.arrayBuffer(); // 上限 95MB，串行下同时只有一份
+      const digest = await crypto.subtle.digest('SHA-256', buf);
+      return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    });
+    hashChain = run.then(() => {}, () => {});
+    item._hashPromise = run.then(
+      (hex) => { item.sha256 = hex; },
+      () => { item.sha256 = ''; } // 算不出（非安全上下文等）就空着走老逻辑，上传不因此失败
+    ).then(() => {
+      item.hashing = false;
+      renderItem(item);
+    });
   }
 
   /** 把上次关页留下的会话接上 File 句柄：同一个文件、同一个键，从已完成的分片之后继续 */
@@ -2517,6 +2546,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         st.textContent = '完成';
       } else if (item.preparing) {
         st.textContent = '建立分片会话…';
+      } else if (item.hashing) {
+        st.textContent = '计算指纹…';
       } else if (item.finishing) {
         st.textContent = item.thumbPhase ? '生成缩略图…' : '合并分片…';
       } else if (pct >= 100) {
@@ -2669,6 +2700,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       thumbFailedCount = 0;
       toast(`有 ${n} 张图没生成缩略图（格式或尺寸不支持）。可用工具栏的「补缩略图」重试`, true);
     }
+    // 同理，查重复用也要说一声，不然「怎么传完没多图」会让人怀疑没传上
+    if (dedupCount) {
+      const n = dedupCount;
+      dedupCount = 0;
+      toast(`有 ${n} 张图与库里已有的内容相同，已复用原图、跳过上传`);
+    }
     scheduleUploadUi();
   }
 
@@ -2687,6 +2724,15 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     scheduleUploadUi();
 
     try {
+      // 指纹还没算完就等它（入队时已在串行链上开算）。算不出来就空着走老逻辑。
+      if (!item.sha256 && item._hashPromise) {
+        item.hashing = true;
+        renderItem(item);
+        await item._hashPromise;
+        item.hashing = false;
+        renderItem(item);
+      }
+
       if (!item.multipart) {
         // 小文件整传是「真正在传字节」的活，放进高优先级队列；start 任务立刻让出槽位，
         // 这样一次加入很多文件时，不会让后面的 begin 把前面的整传任务压住。
@@ -2706,7 +2752,15 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
           size: item.file.size,
           album: item.album,
           rating: item.rating,
+          sha256: item.sha256 || '',
         }, { signal: AbortSignal.timeout(30000) }), item);
+        if (res.exists) {
+          // 同内容已经在库里：复用既有记录，一个字节不用传，也不用补缩略图
+          item.preparing = false;
+          dedupCount++;
+          await finishItem(item, res.image, { skipThumb: true });
+          return;
+        }
         item.key = res.key;
         item.uploadId = res.uploadId;
         item.preparing = false;
@@ -2736,15 +2790,20 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   /** 小文件整传：一个请求，占池子的一个槽（由 partQueue 调度） */
   async function runWholeUpload(item) {
     if (item.state !== 'uploading') return;
-    const image = await withRetry(() => {
+    const res = await withRetry(() => {
       item._inflight = { 0: 0 };
       return uploadOne(item.file, item.album, item.rating, (loaded) => {
         item._inflight[0] = loaded;
         onItemProgress(item);
       }, item);
     }, item);
+    if (res.exists) {
+      dedupCount++;
+      finishItem(item, res.image, { skipThumb: true }).catch((e) => handleItemError(item, e));
+      return;
+    }
     // 不 await：缩略图那一步不能占着并发槽，否则 4 个槽会被排队等缩略图的文件堵住
-    finishItem(item, image).catch((e) => handleItemError(item, e));
+    finishItem(item, res.image).catch((e) => handleItemError(item, e));
   }
 
   function scheduleParts(item) {
@@ -2772,8 +2831,14 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     scheduleUploadUi();
     (async () => {
       try {
-        const image = await withRetry(() => completeMultipart(item), item);
-        await finishItem(item, image);
+        const res = await withRetry(() => completeMultipart(item), item);
+        if (res.exists) {
+          // begin 之后、complete 之前有并发上传抢先落了库：采用既有行
+          dedupCount++;
+          await finishItem(item, res.image, { skipThumb: true });
+        } else {
+          await finishItem(item, res.image);
+        }
       } catch (e) {
         item.finishing = false;
         handleItemError(item, e);
@@ -2793,9 +2858,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       size: item.file.size, // 服务端用它核对合并后的大小（只传了一部分分片时能发现）
       album: item.album,
       rating: item.rating,
+      sha256: item.sha256 || '',
       parts,
     }, { signal: AbortSignal.timeout(30000) });
-    return res.image;
+    return res; // 完整响应：exists 标记（并发撞库时复用既有图）由调用方识别
   }
 
   /**
@@ -2879,30 +2945,34 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
    * 上传完成后的收尾：生成/上传缩略图、写结果与历史、刷新列表。
    * 缩略图走 1 槽的 promise 链——4 路并发下同时 decode 大图会内存尖峰。
    * 任何人都不许在这一步暂停/取消：图片已经在服务端了，再「取消」只会让状态撒谎。
+   * opts.skipThumb：查重命中的复用（skipThumb=true）不重做缩略图 ——
+   * 既有记录已经带着它的缩略图（或本来就没有），再传一份同样的没有意义。
    */
-  async function finishItem(item, image) {
+  async function finishItem(item, image, opts) {
     if (!image) { handleItemError(item, new Error('服务端没有返回图片信息')); return; }
     item.imageId = image.id;
     item.finishing = true;
-    item.thumbPhase = true;
+    item.thumbPhase = !(opts && opts.skipThumb); // 复用既有图时没有缩略图阶段
     renderItem(item);
     scheduleUploadUi();
 
     let thumbOk = false;
-    try {
-      const blob = await queueThumb(() => makeThumb(item.file));
-      if (blob) {
-        await api('/api/images/' + image.id + '/thumb', {
-          method: 'PUT',
-          headers: { 'content-type': blob.type || 'image/webp' },
-          body: blob,
-        });
-        thumbOk = true;
+    if (!(opts && opts.skipThumb)) {
+      try {
+        const blob = await queueThumb(() => makeThumb(item.file));
+        if (blob) {
+          await api('/api/images/' + image.id + '/thumb', {
+            method: 'PUT',
+            headers: { 'content-type': blob.type || 'image/webp' },
+            body: blob,
+          });
+          thumbOk = true;
+        }
+      } catch (e) {
+        console.warn('[picbed] 缩略图没传成：', e.message || e);
       }
-    } catch (e) {
-      console.warn('[picbed] 缩略图没传成：', e.message || e);
+      if (!thumbOk) thumbFailedCount++;
     }
-    if (!thumbOk) thumbFailedCount++;
 
     item.thumbDone = thumbOk;
     item.finishing = false;
@@ -3077,6 +3147,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       rating: item.rating || '',
       key: item.key || '',
       uploadId: item.uploadId || '',
+      sha256: item.sha256 || '', // 指纹存下来，续传时不用重算
       parts: item.parts.map((p) => ({ n: p.n, etag: p.etag, size: p.size || 0 })),
       partSize: PART_SIZE, // 分片边界：将来 PART_SIZE 调整时，旧会话据此作废重来
       state: item.state,

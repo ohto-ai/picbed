@@ -127,10 +127,10 @@ Account ID 已经写在 `wrangler.toml` 里（它不是密钥），所以 CI 那
 | GET | `https://img.ohtoai.top/` | 无 | 站点首页。桶不会自己找首页，靠控制台那条 URL Rewrite 规则把 `/` 内部改写成 `/index.html` |
 | GET | `https://img.ohtoai.top/<key>` | 无 | 图片直链。**任何状态都能打开**（不经 Worker） |
 | GET | `/api/public/images?album=&rating=&page=&pageSize=` | 公开 | 相册列表，只含可陈列的图。带 CORS |
-| POST | `/api/upload?album=&rating=` | 密码 | 上传。裸 body，文件名放 `X-Filename`（非 ASCII 要 URL 编码）。相册与分级走 **query 参数**：中文相册名在 URL 里天然安全，而且空串能表达「传到根目录」 |
-| POST | `/api/upload/begin` | 密码 | 分片上传第一步。body `{filename, contentType, size, album?, rating?}` → `{key, uploadId}`。相册省略 = 按日期，空串 = 根目录 |
+| POST | `/api/upload?album=&rating=` | 密码 | 上传。裸 body，文件名放 `X-Filename`（非 ASCII 要 URL 编码），可选头 `x-sha256` 传内容指纹（64 位十六进制）——命中即返回 `200 {exists:true, image:既有行}`，一个字节不传。相册与分级走 **query 参数**：中文相册名在 URL 里天然安全，而且空串能表达「传到根目录」 |
+| POST | `/api/upload/begin` | 密码 | 分片上传第一步。body `{filename, contentType, size, album?, rating?, sha256?}` → `{key, uploadId}`；sha256 命中已有记录则返回 `200 {exists:true, image}`、不开会话。相册省略 = 按日期，空串 = 根目录 |
 | PUT | `/api/upload/part?key=&uploadId=&partNumber=` | 密码 | 分片上传：裸 body 传一片（除末片外每片 ≥ 5MiB），返回 `{partNumber, etag, size}`。会话失效回 **410** |
-| POST | `/api/upload/complete` | 密码 | 分片上传最后一步。body `{key, uploadId, filename, contentType, size?, album?, rating?, parts:[{partNumber, etag}]}` → 201 + `{image}`。合并后大小与声明不符回 400 并删对象；对已完成的键重复调用会幂等返回 200 |
+| POST | `/api/upload/complete` | 密码 | 分片上传最后一步。body `{key, uploadId, filename, contentType, size?, album?, rating?, sha256?, parts:[{partNumber, etag}]}` → 201 + `{image}`。合并后大小与声明不符回 400 并删对象；对已完成的键重复调用、或 sha256 已被并发上传抢先落库，都幂等返回 `200 {exists:true, image}` |
 | POST | `/api/upload/abort` | 密码 | 放弃分片会话，清掉 R2 侧已传分片。body `{key, uploadId}` |
 | PUT | `/api/images/:id/thumb` | 密码 | 上传浏览器生成的缩略图（body 是图片字节，Content-Type 决定扩展名）。键由服务端推导 |
 | GET | `/api/images?page=&pageSize=&rating=&hidden=&q=&album=&thumb=` | 密码 | 管理列表，含隐藏与 unspecified。`thumb=missing` 只列还没有缩略图的（批量补全用）。**带 `album=`（哪怕空串）就精确筛该相册，不传才是不筛** |
@@ -174,6 +174,29 @@ R2 侧未完成的上传**7 天未完成会自动中止**，所以孤儿会话�
 这是产品上限，不是协议上限，将来想放开只需调大这个变量并同步前端。
 每片仍受 Workers 免费版 100MB 请求体上限约束，10MiB 留足了余量。
 
+### 内容寻址与查重（sha256）
+
+带指纹的上传走**内容寻址**：键就是 `img/<sha256>.<ext>`，同内容永远同键。
+
+- **查重在元数据阶段**：begin / 单传带上 sha256，D1 里已有同指纹的记录就直接返回
+  `200 {exists:true, image:既有行}`，一个字节不用传 —— 同一批文件二次上传几乎瞬间完成
+- **存储层双保险**：就算查重漏网（同哈希同键），R2 put 也是覆盖同一对象，不会出现第二份；
+  并发上传同一内容时，sha256 唯一索引让后落库的一方撞索引、采用既有行并删掉自己的多余对象
+- **同内容只保留一条记录**（跨相册也算重复）：想把图挪到别的相册用管理页的「移动」；
+  指纹由客户端声明（服务端不重算 —— 免费版 10ms CPU 扛不住整文件哈希）
+- **不带指纹的客户端**（`admin.html`、旧版前端、curl 不带头）自动走老逻辑随机键，完全兼容
+- **`/api/transfer`（URL 转存）不参与查重**：同上，服务端算不动哈希，维持原样
+- 缩略图键从原图键推导，去重命中时连缩略图都天然只有一份
+
+存量老图没有指纹，用一次性脚本回填并顺手清掉历史重复：
+
+```bash
+node scripts/backfill-dedup.mjs          # 回填指纹 + 打印重复报告（不删任何东西）
+node scripts/backfill-dedup.mjs --apply  # 按报告真删（D1 行 + R2 原图/缩略图对象）
+```
+
+脚本只依赖本机已登录的 wrangler，幂等可重跑；删之前先看报告。
+
 **鉴权**：管理接口用共享密码（请求头 `x-picbed-key`，对应 `wrangler secret` 里的 `PICBED_PASSWORD`）。
 没设密码时管理接口一律 **503**，不会放行。公开的相册接口不需要密码。
 
@@ -207,7 +230,7 @@ R2 侧未完成的上传**7 天未完成会自动中止**，所以孤儿会话�
 
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
-| `PREFIX` | `img` | 键前缀（键形如 `img/YYYY/MM/DD/时间戳-随机.jpg`） |
+| `PREFIX` | `img` | 键前缀。带指纹的新上传键形 `img/<sha256>.<ext>`；不带指纹的旧客户端仍是 `img/YYYY/MM/DD/时间戳-随机.ext` |
 | `IMAGE_BASE` | `https://img.ohtoai.top` | 直链前缀，接口用它拼完整 URL |
 | `DEFAULT_ALBUM_RATING` | `g` | 相册不带参数时的档位。想让访客默认看到更多，改成 `r12` / `r15` / `r18` |
 | `LIST_CACHE_SECONDS` | `0` | 相册接口的边缘缓存秒数。**0 = 不缓存，永远最新**；访问量上来想省 D1 读取再调大 |
