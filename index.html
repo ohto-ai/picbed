@@ -217,9 +217,9 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .btn.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
 .btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; transform: none; }
 
-/* 面包屑导航：吸顶，避让顶栏高度 */
+/* 面包屑导航：在 .gallery-head 吸顶块内，本身不再单独 sticky（原先自己吸顶，
+   工具栏却滚走了 —— 现在整块一起常驻） */
 .gallery-path {
-  position: sticky; top: calc(var(--appbar-h) + 8px); z-index: 6;
   display: flex; align-items: center; flex-wrap: wrap;
   margin: 14px 0 12px; padding: 7px 12px;
   background: var(--glass-strong); border: 1px solid var(--border);
@@ -329,6 +329,17 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 .h-btns { display: flex; gap: 4px; flex-shrink: 0; }
 
 /* 相册 */
+/* 页头操作区整体吸顶：工具栏、转存框、批量条、面包屑作为一块常驻。
+   提示文字是纯说明、不参与吸顶（放在块外，随内容滚走）。
+   打底用页面底色，网格从块底滚过不会从缝隙里透出来；负外边距盖住 .wrap 的左右内边距，
+   滚动内容不从两侧钻出来。pda 皮肤的内边距不同，见它的覆盖。 */
+.gallery-head {
+  position: sticky; top: var(--appbar-h); z-index: 6;
+  display: flow-root;
+  background: var(--bg);
+  margin: 0 -16px; padding: 0 16px 4px;
+}
+html[data-skin="pda"] .gallery-head { margin: 0 -14px; padding: 0 14px 4px; }
 /* 顶栏是 sticky 且空贴 .wrap 顶部，管理视图下工具栏是首个可见元素，给它留出上边距 */
 .gallery-toolbar { display: flex; align-items: center; gap: 8px; margin: 16px 0 12px; flex-wrap: wrap; }
 .gallery-spacer { flex: 1; }
@@ -336,7 +347,6 @@ h1 .zh { font-size: 13px; font-weight: 500; color: var(--muted); }
 #galleryCount { color: var(--muted); font-size: 12px; }
 
 .bulk-bar {
-  position: sticky; top: calc(var(--appbar-h) + 58px); z-index: 5;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   background: var(--glass-strong); border: 1px solid var(--accent);
   border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px;
@@ -1519,6 +1529,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   <input type="file" id="fileInput" accept="image/*" multiple hidden>
   <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
 
+  <div class="gallery-head">
   <div class="gallery-toolbar admin-only">
     <button id="uploadBtn" class="btn primary"><svg class="ic"><use href="#i-upload"/></svg><span class="lbl">上传到当前目录</span></button>
     <button id="uploadDirBtn" class="btn"><svg class="ic"><use href="#i-folder-upload"/></svg><span class="lbl">上传文件夹</span></button>
@@ -1532,8 +1543,6 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       <svg class="ic"><use href="#i-sliders"/></svg><span class="lbl">设置</span>
     </button>
   </div>
-  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 95MB · 支持暂停/断点续传</div>
-
   <div class="urlbar admin-only">
     <input id="urlInput" type="text" placeholder="粘贴任意图片 URL，点「转存」保存到图床…">
     <button id="urlBtn" class="btn"><svg class="ic"><use href="#i-link"/></svg><span class="lbl">转存</span></button>
@@ -1559,6 +1568,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   </div>
 
   <div id="galleryPath" class="gallery-path"></div>
+  </div><!-- /gallery-head：工具栏/转存/批量条/面包屑整体吸顶，见样式表 -->
+
+  <div class="gallery-hint admin-only">拖拽图片或整个文件夹到页面任意位置即可上传（自动递归、仅图片）· 拖到子相册卡片上则上传到该相册 · <b>拖动图片/相册卡片到相册上可移动</b> · 支持 Ctrl+V 粘贴 · 单张 ≤ 95MB · 支持暂停/断点续传</div>
   <div class="gallery-meta">
     <span id="galleryCount"></span>
     <span id="galleryBusy" class="gallery-busy" role="status" hidden><span class="spin"></span><span id="galleryBusyText"></span></span>
