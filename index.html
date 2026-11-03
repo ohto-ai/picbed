@@ -1988,8 +1988,11 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     }
     return data;
   }
-  const apiSend = (path, method, body) =>
-    api(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const apiSend = (path, method, body, extra) =>
+    api(path, Object.assign(
+      { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) },
+      extra
+    ));
 
   // 图片直链：接口返回的 url / thumb_url 优先用；只有手上只有键时才用这里拼
   function publicUrl(key) {
@@ -2149,9 +2152,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (sanitizeAlbum(album) === null) { skippedReserved++; continue; } // 含保留段 _picbed
 
       const ident = identOfFile(f);
-      // 同一个文件已经在队列里：暂停/失败的顺手恢复，正在传的忽略重复
-      //（重新选一次文件本来就是「继续」最自然的入口；重复上传会生成两个 key）
-      const live = queue.find((it) => it.state !== 'done' && identOfFile(it.file) === ident);
+      // 同一个文件已经在队列里：同相册的暂停/失败顺手恢复，正在传的忽略重复
+      //（重新选一次文件本来就是「继续」最自然的入口；重复上传会生成两个 key）。
+      // 判重带上相册：往**另一个**相册拖同一个文件是「我要两份」的明确意图，不该被拦。
+      const live = queue.find(
+        (it) => it.state !== 'done' && identOfFile(it.file) === ident && it.album === album
+      );
       if (live) {
         if (live.state === 'failed') { retryItem(live); resumed++; }
         else if (live.state === 'paused') { resumeItem(live); resumed++; }
@@ -2321,6 +2327,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (cfg.password) xhr.setRequestHeader('x-picbed-key', cfg.password);
       xhr.setRequestHeader('x-filename', encodeURIComponent(file.name)); // 头只能放 Latin-1，中文名要先编码
       xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+      // 超时按文件大小伸缩（50KB/s 下限折算；95MB ≈ 33 分钟）：挂死的连接不能无限占着并发槽。
+      // 408 在 isRetryable 白名单里，超时会接通现有重试链。
+      xhr.timeout = Math.max(60000, Math.round(file.size / 50));
 
       let settled = false;
       const settle = (fn, value) => {
@@ -2456,7 +2465,9 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     enqueue(file, saved.album || '', saved);
     renderResumeBar();
     const item = queue[queue.length - 1];
-    toast(`续传「${file.name}」：已完成 ${pctOf(item)}%`);
+    toast(saved.uploadId
+      ? `续传「${file.name}」：已完成 ${pctOf(item)}%`
+      : `重新上传「${file.name}」`);
   }
 
   // ---------- 并发调度 ----------
@@ -2480,6 +2491,11 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     return Math.min(100, Math.round((computeLoaded(item) / item.file.size) * 100));
   }
 
+  /** 队列行状态里的进度段：「已上传 / 总数 · 百分比」（含在途字节，与进度条同一口径） */
+  function progressText(item) {
+    return `${fmtBytes(computeLoaded(item))} / ${fmtBytes(item.file.size)} · ${pctOf(item)}%`;
+  }
+
   function renderItem(item) {
     if (!item || !item.row) return;
     const pct = item.state === 'done' ? 100 : pctOf(item);
@@ -2493,7 +2509,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     if (st) {
       st.onclick = null;
       if (item.state === 'paused') {
-        st.textContent = `已暂停 · ${pct}%`;
+        st.textContent = `已暂停 · ${progressText(item)}`;
       } else if (item.state === 'failed') {
         st.textContent = `失败：${item.error || '未知错误'}（点此重试）`;
         st.onclick = () => retryItem(item);
@@ -2505,10 +2521,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
         st.textContent = item.thumbPhase ? '生成缩略图…' : '合并分片…';
       } else if (pct >= 100) {
         st.textContent = '处理中…';
-      } else if (item.multipart) {
-        st.textContent = `分片 ${item.parts.length}/${partCount(item)} · ${pct}%`;
       } else {
-        st.textContent = pct + '%';
+        st.textContent = progressText(item);
       }
     }
 
@@ -2528,8 +2542,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (item.fill) item.fill.style.width = pct + '%';
       if (item.statusEl) {
         if (pct >= 100) item.statusEl.textContent = '处理中…';
-        else if (item.multipart) item.statusEl.textContent = `分片 ${item.parts.length}/${partCount(item)} · ${pct}%`;
-        else item.statusEl.textContent = pct + '%';
+        else item.statusEl.textContent = progressText(item);
       }
     }
     noteProgress();
@@ -2685,13 +2698,15 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (!item.uploadId || !item.key) {
         item.preparing = true;
         renderItem(item);
+        // begin/complete 只是元数据请求：30s 超时，别让挂住的 fetch 占着并发槽。
+        // TimeoutError 没有 status → isRetryable 视为可重试，正好接上退避链。
         const res = await withRetry(() => apiSend('/api/upload/begin', 'POST', {
           filename: item.file.name,
           contentType: item.file.type || 'application/octet-stream',
           size: item.file.size,
           album: item.album,
           rating: item.rating,
-        }), item);
+        }, { signal: AbortSignal.timeout(30000) }), item);
         item.key = res.key;
         item.uploadId = res.uploadId;
         item.preparing = false;
@@ -2779,7 +2794,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       album: item.album,
       rating: item.rating,
       parts,
-    });
+    }, { signal: AbortSignal.timeout(30000) });
     return res.image;
   }
 
@@ -2827,6 +2842,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       xhr.onerror = () => settle(reject, new Error('网络错误'));
       xhr.onabort = () => settle(reject, cancelledError());
       xhr.ontimeout = () => settle(reject, Object.assign(new Error('请求超时'), { status: 408 }));
+      // 超时按片大小伸缩（50KB/s 下限折算；10MiB ≈ 210s，末片走 60s 兜底）
+      xhr.timeout = Math.max(60000, Math.round((end - start) / 50));
       item._inflight[n] = 0; // 重试时别沿用上一次的进度
       item._xhrs.add(xhr);
       xhr.send(blob);
@@ -3061,6 +3078,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       key: item.key || '',
       uploadId: item.uploadId || '',
       parts: item.parts.map((p) => ({ n: p.n, etag: p.etag, size: p.size || 0 })),
+      partSize: PART_SIZE, // 分片边界：将来 PART_SIZE 调整时，旧会话据此作废重来
       state: item.state,
       error: item.error || '',
       startedAt: item.startedAt || Date.now(),
@@ -3118,6 +3136,13 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       s.parts = (Array.isArray(s.parts) ? s.parts : [])
         .map((p) => ({ n: Number(p.n || p.partNumber) || 0, etag: p.etag, size: Number(p.size) || 0 }))
         .filter((p) => p.n > 0 && p.etag);
+      // 分片边界对不上（PART_SIZE 改过）：旧分片的字节区间已经作废，整套会话从头来。
+      // 不作废的话恢复上传会按新边界切块，R2 在 complete 时报「分片不完整」。
+      if (s.partSize && s.partSize !== PART_SIZE) {
+        s.parts = [];
+        s.key = '';
+        s.uploadId = '';
+      }
       orphanSessions.set(identOfSession(s), s);
     }
     saveUploads(); // 顺手把过期条目从 localStorage 里清掉
@@ -3150,7 +3175,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       name.title = s.name;
       const meta = document.createElement('span');
       meta.className = 'r-meta';
-      meta.textContent = `${fmtBytes(s.size)} · ${sessionPct(s)}%`;
+      // 没有 uploadId 的会话（单请求小文件 / 还没 begin 的）没有可续传的服务端状态，只能整传重来
+      meta.textContent = s.uploadId
+        ? `${fmtBytes(s.size)} · ${sessionPct(s)}%`
+        : `${fmtBytes(s.size)} · 需整传重传`;
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'q-act danger';
@@ -3349,7 +3377,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       badge.className = 'fab-badge';
       badge.textContent = pct + '%';
       $('panelBadge').textContent =
-        `上传中 ${s.active} 个${s.paused ? ` · 暂停 ${s.paused}` : ''} · ${pct}%${speed ? ' · ' + speed : ''}`;
+        `上传中 ${s.active} 个${s.paused ? ` · 暂停 ${s.paused}` : ''} · ${fmtBytes(s.loaded)} / ${fmtBytes(s.total)} · ${pct}%${speed ? ' · ' + speed : ''}`;
       if (pauseBtn) { pauseBtn.hidden = false; setLabel(pauseBtn, '暂停全部'); setIcon(pauseBtn, 'pause'); }
     } else if (s.paused) {
       badge.className = 'fab-badge idle';
