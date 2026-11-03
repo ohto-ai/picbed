@@ -23,7 +23,6 @@
 
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,8 +42,8 @@ const DOWNLOAD_CONCURRENCY = 8;
 const SQL_CHUNK = 90; // 与 src/db.js 的 CHUNK 一致：D1 单语句 100 绑定参数上限
 
 let wranglerCalls = 0;
-// 临时 SQL 目录放在 worker-r2 下面：路径里没有空格。所有 SQL 一律走 --file ——
-// spawnSync 开着 shell:true 时，--command 里的空格会被 shell 拆词，SQL 直接碎掉。
+// 临时 SQL 目录放在 worker-r2 下面：路径里没有空格。批量写回（UPDATE/DELETE）走 --file，
+// 那是 mutation 不需要返回值；SELECT 走 --command（见 d1Query 里的说明）。
 let tmpDir = '';
 
 /** 跑一条 wrangler 命令，返回 stdout。失败直接抛（带 stderr） */
@@ -63,12 +62,22 @@ function wrangler(args, { quiet = false } = {}) {
   return r.stdout;
 }
 
-/** d1 查询：SQL 走临时文件。剥掉 wrangler 可能夹带的非 JSON 行，返回 results 数组 */
+/** d1 查询：SELECT 必须走 --command —— wrangler 的 --file 是 import 管道，不返回查询结果。
+ *  shell:true 下数组拼接会把含空格的 SQL 拆碎，所以这里传整条命令串、SQL 自己用双引号包好
+ *  （SQL 全是脚本内的常量：哈希是十六进制、id 是数字，没有需要转义的输入）。 */
 function d1Query(sql) {
-  const file = join(tmpDir, `q-${Math.random().toString(36).slice(2)}.sql`);
-  writeFileSync(file, sql, 'utf8');
-  const out = wrangler(['d1', 'execute', DB, ...D1_TARGET, '--json', '--file', file, '-y'], { quiet: true });
-  rmSync(file, { force: true });
+  const target = D1_TARGET.join(' ');
+  const cmd = `wrangler d1 execute ${DB} ${target} --json --command "${sql}" -y`.replace(/\s+/g, ' ');
+  const r = spawnSync(cmd, {
+    cwd: WORKER_DIR,
+    shell: true,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (r.status !== 0) {
+    throw new Error(`d1 查询失败（exit ${r.status}）：\n${(r.stderr || r.stdout || '').slice(-2000)}`);
+  }
+  const out = r.stdout;
   // wrangler 有时在 JSON 前带日志行：从每个 '[' 处试解析，取第一个能过 JSON.parse 的
   for (let i = out.indexOf('['); i >= 0; i = out.indexOf('[', i + 1)) {
     try {
