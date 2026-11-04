@@ -1782,32 +1782,23 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   };
   let cfg = Object.assign({}, DEFAULTS, window.PICBED_CONFIG || {});
   const STORE_KEY = 'picbed_settings';
-  const PWD_KEY = 'picbed_password';
   try {
-    // 本机只存 api / format（见 saveSettings）。老版本可能还存着 thumb、worker、
-    // customDomain 之类的键 —— 那些字段现在没人读，不必专门删。
+    // 本机存 api / password / format（见 saveSettings）。老版本可能还存着 thumb、worker、
+    // customDomain 之类的键 —— 那些字段现在没人读，合并进来也无害，不必专门删。
+    //
+    // ⚠️ 密码放 localStorage（持久）是**有意的选择**：曾短暂改存 sessionStorage，
+    // 但它按标签页隔离，新开标签页就得重输，日常摩擦太大，已回退。
+    // 风险靠**内容层**兜住 —— 同源脚本要偷密码，前提是站点源上有活动内容可执行，
+    // 而这条链已经断掉：上传只收 image/*（api.js 的 assertImageMime）、
+    // SVG 直链强制 attachment、存量库无 SVG（2026-11 查证）。
+    // 残余风险只剩「绕过 API 手动往桶里塞文件」，真有这个习惯再给 img 子域配区域级响应头规则。
     cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(STORE_KEY) || '{}'));
-    // ⚠️ 密码不进 localStorage：站点源与上传的图片同源，一旦有活动内容（SVG 等）在这个
-    // 源上执行脚本，持久存储里的密码就是第一个被读走的东西。改存 sessionStorage ——
-    // 关掉标签页即失效（与 admin.html 的做法一致），代价是每个新会话要重输一次密码。
-    // 老版本留在 localStorage 里的密码就地迁移，然后从持久存储里删干净。
-    if (cfg.password) {
-      if (!sessionStorage.getItem(PWD_KEY)) sessionStorage.setItem(PWD_KEY, cfg.password);
-      delete cfg.password;
-      localStorage.setItem(STORE_KEY, JSON.stringify({ api: cfg.api, format: cfg.format }));
-    }
-  } catch (e) { /* 存的不是合法 JSON / 隐私模式读写受限：当没有 */ }
-  try {
-    cfg.password = sessionStorage.getItem(PWD_KEY) || '';
-  } catch (e) { cfg.password = ''; }
+  } catch (e) { /* 存的不是合法 JSON：当没有 */ }
 
   function saveSettings() {
-    // 密码只进 sessionStorage（见上面的迁移注释），localStorage 里只放 api / format
-    localStorage.setItem(STORE_KEY, JSON.stringify({ api: cfg.api, format: cfg.format }));
-    try {
-      if (cfg.password) sessionStorage.setItem(PWD_KEY, cfg.password);
-      else sessionStorage.removeItem(PWD_KEY);
-    } catch (e) { /* 隐私模式存不下就算了，不影响本页使用 */ }
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      api: cfg.api, password: cfg.password, format: cfg.format,
+    }));
   }
 
   // ---------- 通用 ----------
