@@ -563,7 +563,7 @@ export async function handleUploadComplete(request, env) {
     // 上一次 complete 可能其实成功了、只是响应没回到客户端（断网/关页）。
     // 键是不可变的，D1 里已经有这个键就直接把它当成功返回，避免客户端重传出一张重复图。
     const existing = await db.getImageByKey(env, key).catch(() => null);
-    if (existing) return jsonAdmin({ image: shape(existing, env) });
+    if (existing) return jsonAdmin({ image: shape(existing, env), exists: true });
     return jsonErr(
       isMissingUploadError(e) ? 410 : 502,
       '合并分片失败：' + (e && e.message ? e.message : e)
@@ -774,7 +774,7 @@ export async function handleBulk(request, env) {
   if (!ids.length) return jsonErr(400, 'ids 不能为空');
   if (ids.length > 500) return jsonErr(400, '一次最多处理 500 条');
 
-  if (body.delete) {
+  if (body.delete === true) {
     const rows = await db.getImagesByIds(env, ids);
     if (rows.length) {
       await deleteObjects(env, rows);
@@ -835,11 +835,14 @@ export async function handleAlbumRename(request, env) {
   const { body, error } = await readJson(request);
   if (error) return jsonErr(400, error);
 
+  // to 必须是显式字符串：漏传和「移到根目录（空串）」是两回事，
+  // safeAlbum(undefined) 会返回 ''，不拦的话漏传 = 整棵子树静默搬到根目录
+  const rawTo = body ? body.to : undefined;
+  if (typeof rawTo !== 'string') return jsonErr(400, '缺少目标相册名');
   const from = safeAlbum(body && body.from);
-  const to = safeAlbum(body && body.to);
+  const to = safeAlbum(rawTo);
   if (from === null || to === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
   if (!from) return jsonErr(400, '不能重命名根目录');
-  if (to === undefined) return jsonErr(400, '缺少目标相册名');
   // 不能把相册移进它自己或它的子相册，否则子树会自我嵌套
   if (to === from || to.startsWith(from + '/')) return jsonErr(400, '不能移动到自身或其子相册下');
 
@@ -929,16 +932,18 @@ export async function handleTransfer(request, env) {
   if (!buf.byteLength) return jsonErr(400, '空文件');
   if (buf.byteLength > limit) return jsonErr(413, '远程图片超过大小上限');
 
+  // 分级/相册的校验放在**写 R2 之前**：保留名 400 时对象还没传，不留孤儿。
+  // 相册语义与 /api/upload 对齐：不传 = 按日期归档；空串 = 根目录（此前空串会错误回落到日期相册）。
+  let rating = String(body.rating || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
+  if (!RATINGS.includes(rating)) rating = 'unspecified';
+  const album = body.album === undefined || body.album === null ? dateAlbum() : safeAlbum(body.album);
+  if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
+
   const key = makeKey(env, filename, contentType);
   const cacheSeconds = Number(env.IMAGE_CACHE_SECONDS) || 0;
   const httpMetadata = { contentType };
   if (cacheSeconds > 0) httpMetadata.cacheControl = `public, max-age=${cacheSeconds}`;
   await env.BUCKET.put(key, buf, { httpMetadata });
-
-  let rating = String(body.rating || env.UPLOAD_DEFAULT_RATING || 'unspecified').trim();
-  if (!RATINGS.includes(rating)) rating = 'unspecified';
-  const album = body.album ? safeAlbum(body.album) : dateAlbum();
-  if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
   const row = {
     r2_key: key,
@@ -972,6 +977,21 @@ export async function handleTransfer(request, env) {
  * 代价是最长这么久才更新——按需在 wrangler.toml 里调。
  */
 export async function handlePublicList(request, url, env, ctx) {
+  try {
+    return await publicListInner(request, url, env, ctx);
+  } catch (e) {
+    // 公开路径匿名可达：D1 故障的异常会冒泡到顶层 catch，把错误原文（SQL 片段、绑定参数）
+    // 直接回给任意访客 —— 这里拦下，只回通用文案，细节留在 console。
+    // 错误响应也必须带 CORS 头，否则浏览器把它当网络错误，访客看不到任何提示。
+    console.error('[picbed] 公开列表失败:', e);
+    return new Response(JSON.stringify({ error: '相册列表暂时不可用，请稍后再试' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...CORS_PUBLIC },
+    });
+  }
+}
+
+async function publicListInner(request, url, env, ctx) {
   const cacheSeconds = Number(env.LIST_CACHE_SECONDS) || 0;
   const bypass = url.searchParams.get('refresh') === '1';
   const useCache = cacheSeconds > 0 && !bypass && request.method === 'GET';

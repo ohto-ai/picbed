@@ -1987,7 +1987,10 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     // 公开接口不带密码：它不需要鉴权，带上反而会多一次预检，
     // 一旦服务端没在预检里放行这个头，整个请求会被浏览器拦掉（踩过一次）。
     if (cfg.password && !path.startsWith('/api/public/')) headers['x-picbed-key'] = cfg.password;
-    const res = await fetch(cfg.api + path, Object.assign({}, o, { headers }));
+    // 30 秒兜底超时：Worker 假死时进度条/按钮不再永久卡住。
+    // 调用方自带 signal（分片上传的 begin/complete）以调用方的为准；
+    // 下载原图/补缩略图拉原图走各自的 fetch，不经过这里，不受影响。
+    const res = await fetch(cfg.api + path, Object.assign({}, o, { headers, signal: o.signal || AbortSignal.timeout(30000) }));
 
     let data = null;
     try { data = await res.json(); } catch (e) { /* 有些响应没有 JSON 体 */ }
@@ -3357,7 +3360,11 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   // ---------- 历史 ----------
   const HISTORY_KEY = 'picbed_history';
   let history = [];
-  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (e) {}
+  try {
+    const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    // 存储被写坏成非数组时按空表处理：renderHistory 会对非数组抛 TypeError，IIFE 中断就是整页白屏
+    if (Array.isArray(h)) history = h;
+  } catch (e) {}
 
   function persistHistory() { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
 
@@ -4093,6 +4100,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       btn.hidden = galleryPage >= galleryMaxPage;
     } catch (e) {
       console.error('[picbed] 相册加载失败:', e.message || e);
+      // 页码在 fetch 前就 ++ 了：失败要退回来，否则重试「加载更多」会跳过这一页
+      if (seq === galleryReqSeq && !reset) galleryPage--;
       // 已经切走就连报错都不弹：用户看的是别的目录，这次失败与他无关
       if (seq === galleryReqSeq) toast('相册加载失败：' + errMsg(e), true);
     } finally {
@@ -4180,6 +4189,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       }
     } catch (e) {
       console.error('[picbed] 公开画廊加载失败:', e.message || e);
+      if (seq === galleryReqSeq && !reset) publicPage--; // 页码已 ++：失败退回，重试别跳页
       if (seq !== galleryReqSeq) return; // 已经切走：别用错误提示盖掉新视图的内容
       if (reset) publicGridHint('公开画廊加载失败：' + (e.message || '无法连接服务') + '（若刚更新过页面，请确认 Worker 已重新部署）', 'alert');
       toast('公开画廊加载失败：' + (e.message || e), true);
@@ -5639,19 +5649,23 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   }
 
   // ---------- URL 转存 ----------
+  let transferring = false; // 在途标志：转存要等 Worker 抓远程图，期间输入框按 Enter 会并发重复提交同一 URL
   async function transferUrl() {
     const input = $('urlInput');
     const url = input.value.trim();
-    if (!url) return;
+    if (!url) return toast('请先粘贴图片链接', true);
+    if (transferring) return;
     if (!/^https?:\/\//i.test(url)) return toast('请输入 http(s) 链接', true);
     if (!needWorker()) return;
+    transferring = true;
     const release = beginLoad(); // 转存要等 Worker 抓远程图片，可能好几秒
     const btn = $('urlBtn');
     btn.disabled = true;
     setLabel(btn, '转存中…');
     try {
-      // 由 Worker 抓取远程图片并存进 R2（大小上限同上传、15 秒超时）
+      // 由 Worker 抓取远程图片并存进 R2（大小上限与上传独立，见 TRANSFER_MAX_BYTES，15 秒超时）
       const data = await apiSend('/api/transfer', 'POST', { url, rating: currentUploadRating() });
+      if (!data || !data.image) throw new Error('服务端响应异常');
       input.value = '';
       const image = data.image;
       toast('转存成功');
@@ -5663,6 +5677,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     } catch (e) {
       toast(e.message, true);
     } finally {
+      transferring = false;
       release();
       btn.disabled = false;
       setLabel(btn, '转存');

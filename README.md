@@ -285,6 +285,7 @@ picbed/
 ├─ config.js               # 站点配置（后端地址、唯一域名、仓库地址、默认界面风格）
 ├─ .github/workflows/      # deploy.yml：把上面两个文件传进 R2 桶（站点就是从桶里发出去的）
 ├─ docs/preview/           # README 里的预览图
+├─ scripts/                # backfill-dedup.mjs：存量库回填内容指纹 + 清理历史重复（一次性工具）
 ├─ worker-r2/              # 后端：Worker + R2 + D1
 │  ├─ src/
 │  │  ├─ index.js          #   入口与路由
@@ -430,7 +431,8 @@ picbed/
 - 多选模式：批量删除、批量移动、批量改分级、批量隐藏
 - 复制链接：URL / Markdown / HTML 三种格式（Markdown 与 HTML 的 `alt` 用图片的名字）
 - 下载：灯箱里的按钮或卡片右键菜单，存盘文件名用图片的名字（详见上面的「图片的名字」）
-- 转存：粘贴远程图片 URL，由 Worker 抓取后存进 R2（大小上限与上传相同，15 秒超时）
+- 转存：粘贴远程图片 URL，由 Worker 抓取后存进 R2（独立上限 `TRANSFER_MAX_BYTES` 50MB、15 秒超时，
+  整包读内存所以不跟随上传上限；不参与内容查重）
 - 直链卡片显示的是 `blob:` 地址属正常 —— 那是流式下载器把图片读进内存后的临时引用，
   要分享请用卡片上的复制按钮
 

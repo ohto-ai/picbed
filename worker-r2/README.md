@@ -201,7 +201,7 @@ node scripts/backfill-dedup.mjs --apply  # 按报告真删（D1 行 + R2 原图/
 没设密码时管理接口一律 **503**，不会放行。公开的相册接口不需要密码。
 
 **CORS**：公开接口对所有来源放行；管理接口只对 `ALLOWED_ORIGINS` 里列出的来源发光 CORS 头
-（唯一域名 + 两个别名 + Pages 镜像，其余一律不给），身份靠 `x-picbed-key` 头而不是 Cookie，
+（唯一域名 + 一个别名 picbed.ohtoai.top + Pages 镜像，其余一律不给），身份靠 `x-picbed-key` 头而不是 Cookie，
 所以不带 credentials。
 
 站点与图片现在同源，**前端读图不再需要桶的 CORS**；`r2-cors.json` 留下的用途是别名域名
@@ -233,12 +233,13 @@ node scripts/backfill-dedup.mjs --apply  # 按报告真删（D1 行 + R2 原图/
 | `PREFIX` | `img` | 键前缀。带指纹的新上传键形 `img/<sha256>.<ext>`；不带指纹的旧客户端仍是 `img/YYYY/MM/DD/时间戳-随机.ext` |
 | `IMAGE_BASE` | `https://img.ohtoai.top` | 直链前缀，接口用它拼完整 URL |
 | `DEFAULT_ALBUM_RATING` | `g` | 相册不带参数时的档位。想让访客默认看到更多，改成 `r12` / `r15` / `r18` |
-| `LIST_CACHE_SECONDS` | `0` | 相册接口的边缘缓存秒数。**0 = 不缓存，永远最新**；访问量上来想省 D1 读取再调大 |
+| `LIST_CACHE_SECONDS` | `300` | 公开相册列表的边缘缓存秒数。访客侧 D1 读取省一个量级；代价是隐藏/删除/改分级后公开列表最长这么多秒才反映（管理视图不缓存，永远最新） |
 | `IMAGE_CACHE_SECONDS` | `86400` | 图片直链的缓存秒数，**上传时写进 R2 对象**，改它只影响之后上传的图 |
 | `UPLOAD_DEFAULT_RATING` | `unspecified` | 上传默认分级。想「传完就能直接分享」就改成 `G` |
 | `MAX_UPLOAD_BYTES` | `99614720` | 单文件上限（95MB；免费版单请求体硬上限 100MB，留了余量）。改了同步前端 `index.html` 的 `MAX_UPLOAD_BYTES` |
 | `TRANSFER_MAX_BYTES` | `52428800` | URL 转存单文件上限（50MB）。这条路径整包读内存，受 128MB isolate 内存约束，不能跟着上传上限一起放大 |
-| `ALLOWED_ORIGINS` | 站点的两个域名 | 允许跨域调管理接口的来源（逗号分隔）。前端在 GitHub Pages 上、Worker 在另一个域名，属于跨域；管理接口默认**不发光 CORS 头**，只有这里的来源才放行。不带 credentials（不用 Cookie）。改这里记得同步 `r2-cors.json` |
+| `THUMB_MAX_BYTES` | 未设置时 2MB | 缩略图单文件上限（`PUT /api/images/:id/thumb`）。代码里有默认值，wrangler.toml 不用配；要改就加进 `[vars]` |
+| `ALLOWED_ORIGINS` | `https://img.ohtoai.top,https://picbed.ohtoai.top,https://ohto-ai.github.io` | 允许跨域调管理接口的来源（逗号分隔）：站点域名 + 301 别名 + Pages 镜像。管理接口默认**不发光 CORS 头**，只有这里的来源才放行。不带 credentials（不用 Cookie）。改这里记得同步 `r2-cors.json` |
 
 ### 以后给已有的库加列/加索引
 

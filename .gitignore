@@ -6,3 +6,5 @@ __pycache__/
 seed/
 *-lsjson.json
 .zcode/
+dedup-report.md
+.tmp-backfill-*
