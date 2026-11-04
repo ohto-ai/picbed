@@ -277,7 +277,11 @@ export default {
 
       return jsonErr(404, 'Not Found');
     } catch (e) {
-      return jsonErr(500, (e && e.message) || 'Internal Error');
+      console.error('[picbed] 未处理异常:', e);
+      // 不把异常原文回给调用方：/i/ 等匿名可达路径上，message 可能带内部细节
+      // （键名、SQL 片段、绑定参数）。原文进日志，对外只给通用文案 ——
+      // 公开列表接口已单独这么做（见 api.js 的 handlePublicList）。
+      return jsonErr(500, 'Internal Error');
     }
   },
 };

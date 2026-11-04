@@ -315,6 +315,8 @@ async function api(path, opts = {}) {
   const res = await fetch(path, {
     ...opts,
     headers: { ...(opts.headers || {}), 'x-picbed-key': state.key },
+    // 30 秒兜底超时：Worker 假死时按钮/进度不至于永久卡住（与主站 index.html 同一套）
+    signal: AbortSignal.timeout(30000),
   });
   let data = null;
   try { data = await res.json(); } catch { /* 可能是空响应 */ }
@@ -599,6 +601,8 @@ function uploadOne(file, item) {
     if (rating) qs.set('rating', rating);
 
     xhr.open('POST', '/api/upload' + (qs.toString() ? '?' + qs : ''));
+    // 超时按文件大小伸缩（50KB/s 下限折算）：这条队列是串行的，挂死的连接会把后面的文件全堵死
+    xhr.timeout = Math.max(60000, Math.round(file.size / 50));
     xhr.setRequestHeader('x-picbed-key', state.key);
     xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
     xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
@@ -618,6 +622,8 @@ function uploadOne(file, item) {
       }
     };
     xhr.onerror = () => reject(new Error('网络错误'));
+    // 超时派发的是 ontimeout 而不是 onerror：不接的话 promise 会永远悬着，队列就此卡死
+    xhr.ontimeout = () => reject(new Error('请求超时'));
     xhr.send(file);
   });
 }

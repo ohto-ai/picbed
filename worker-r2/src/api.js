@@ -62,6 +62,11 @@ function jsonAdmin(data, status = 200) {
 /**
  * 删除若干条记录对应的 R2 对象（原图 + 缩略图）。
  * R2 的 delete 一次最多 1000 个键，所以按 1000 分块。
+ *
+ * 刻意吞掉失败：调用方都遵循「先删数据库行、后删对象」的顺序（与
+ * scripts/backfill-dedup.mjs 的说明同一套理由）—— 行已经没了，这里再抛错只会让用户
+ * 对着「删除失败」重试出一个 404；残留的孤儿对象交给 R2 侧的存储清理兜底，
+ * 比「有记录没对象」的坏图轻得多。
  */
 async function deleteObjects(env, rows) {
   const keys = [];
@@ -70,8 +75,27 @@ async function deleteObjects(env, rows) {
     if (r.thumb_key) keys.push(r.thumb_key); // 缩略图和原图一起清，别留孤儿
   }
   for (let i = 0; i < keys.length; i += 1000) {
-    await env.BUCKET.delete(keys.slice(i, i + 1000));
+    const batch = keys.slice(i, i + 1000);
+    await env.BUCKET.delete(batch).catch((e) => {
+      console.error('[picbed] R2 对象删除失败（残留孤儿对象，可手动清理）:', batch, e);
+    });
   }
+}
+
+/**
+ * 常数时间字符串比较：长度不同、内容不同都走满同一趟循环，
+ * 不给「逐字符猜密码」的时序侧信道留信号。
+ * 密码参与比较的两处（鉴权、公开接口的 refresh 门槛）都必须走它 ——
+ * 后者在匿名可达的路径上，尤其不能泄漏「比到了第几位」。
+ */
+function timingSafeEqual(a, b) {
+  const ab = new TextEncoder().encode(String(a));
+  const bb = new TextEncoder().encode(String(b));
+  let diff = ab.length ^ bb.length;
+  for (let i = 0, len = Math.max(ab.length, bb.length); i < len; i++) {
+    diff |= (ab[i] || 0) ^ (bb[i] || 0);
+  }
+  return diff === 0;
 }
 
 /**
@@ -83,7 +107,7 @@ export function requireAuth(request, env) {
   if (!env.PICBED_PASSWORD) {
     return jsonErr(503, '服务端未设置 PICBED_PASSWORD，管理接口已停用（fail closed）');
   }
-  if (request.headers.get('x-picbed-key') !== env.PICBED_PASSWORD) {
+  if (!timingSafeEqual(request.headers.get('x-picbed-key') || '', env.PICBED_PASSWORD)) {
     return jsonErr(403, '密码错误');
   }
   return null;
@@ -199,6 +223,11 @@ function makeKey(env, filename, contentType, sha256) {
 /**
  * 客户端声明的内容指纹（可选参数）：64 位小写十六进制。
  * 传了才参与查重与键生成；格式不对就当没传（静默降级成老逻辑，不让上传失败）。
+ *
+ * ⚠️ 已知取舍：服务端不复核「声明值与内容一致」。免费版 10ms CPU 算不动大文件的
+ *    SHA-256，声明错了会让查重/内容寻址键指到错误内容上；本接口只有持有管理密码的
+ *    人能调，属于自伤面，故不做在线校验。要收紧时从这里加：对小体积（≤5MB）回读
+ *    R2 对象复核，或改由专门的长任务算。
  */
 function normSha256(raw) {
   const s = String(raw || '').trim().toLowerCase();
@@ -207,6 +236,7 @@ function normSha256(raw) {
 
 /** 缩略图扩展名跟着 Content-Type 走：浏览器的 toBlob 在不支持 WebP 时会静默退回 PNG */
 const THUMB_EXT_BY_TYPE = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' };
+const THUMB_MIME = new Set(Object.keys(THUMB_EXT_BY_TYPE)); // 缩略图接受的类型（与扩展名表同源）
 
 /**
  * 缩略图的键：放在原图旁边，主干加 `.thumb.<ext>`。
@@ -229,9 +259,28 @@ class EmptyBodyError extends Error {}
 /** 图片对象的 HTTP 元数据（直链的内容类型与缓存时长），单传与分片两套路径共用 */
 function imageHttpMetadata(env, contentType) {
   const httpMetadata = { contentType: contentType || 'application/octet-stream' };
+  // SVG 直接打开会执行脚本，而生产直链走 R2 自定义域名、根本不经过 Worker
+  // （index.js serveFromR2 里那套 CSP sandbox 线上拿不到）。
+  // Content-Disposition: attachment 让浏览器「下载而不是打开」—— <img> 内嵌不受影响
+  // （嵌入加载会忽略这个头），被当成文档执行的那条路被切断。
+  // 缩略图不接受 SVG（见 handleThumbUpload），所以缩略图键不受此影响。
+  if (contentType === 'image/svg+xml') httpMetadata.contentDisposition = 'attachment';
   const cacheSeconds = Number(env.IMAGE_CACHE_SECONDS) || 0;
   if (cacheSeconds > 0) httpMetadata.cacheControl = `public, max-age=${cacheSeconds}`;
   return httpMetadata;
+}
+
+/**
+ * 直传/分片的 Content-Type 门禁：只放行 image/*（没带类型则落到 application/octet-stream）。
+ * 直链由 R2 自定义域名按这里存的类型原样直出，凡是浏览器会当文档执行的类型
+ * （text/html、application/xhtml+xml…）一律不能入库 —— 这是「站点源上不出现活动内容」的防线。
+ * @returns {Response|null} 返回 Response 表示类型非法（调用方直接返回），null 表示通过
+ */
+function assertImageMime(contentType) {
+  if (contentType && !contentType.startsWith('image/')) {
+    return jsonErr(415, '只接受图片类型（image/*）');
+  }
+  return null;
 }
 
 /** 上传分级：非法值静默回落到 unspecified（与旧行为一致） */
@@ -379,6 +428,8 @@ export async function handleUpload(request, env) {
   const filename = normFilename(headerText(request, 'x-filename'));
 
   const contentType = normContentType(request.headers.get('content-type'));
+  const badMime = assertImageMime(contentType);
+  if (badMime) return badMime;
   const sha256 = normSha256(request.headers.get('x-sha256'));
 
   // 查重在**读 body 之前**：同内容已经在库里，就一个字节都不用传。
@@ -460,6 +511,8 @@ export async function handleUploadBegin(request, env) {
 
   const filename = normFilename(body.filename);
   const contentType = normContentType(body.contentType);
+  const badMime = assertImageMime(contentType);
+  if (badMime) return badMime;
   const sha256 = normSha256(body.sha256);
   // 相册/分级真正落库在 complete；这里先把能提前发现的问题（保留名）挡掉，
   // 免得用户白传 90MB 之后才拿到 400。
@@ -569,6 +622,8 @@ export async function handleUploadComplete(request, env) {
   const limit = Number(env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
   const filename = normFilename(body.filename);
   const contentType = normContentType(body.contentType);
+  const badMime = assertImageMime(contentType);
+  if (badMime) return badMime;
   const sha256 = normSha256(body.sha256);
   const rating = normRating(body.rating, env);
   const album = normAlbum(body.album, env);
@@ -781,6 +836,7 @@ export async function handleUpdate(request, env, id) {
   if (!changed) return jsonErr(404, '没有这条记录');
 
   const row = await db.getImageById(env, id);
+  if (!row) return jsonAdmin({ deleted: true }); // 更新与重读之间被并发删除：别拿 null 去崩 shape
   return jsonAdmin({ image: shape(row, env) });
 }
 
@@ -796,8 +852,10 @@ export async function handleBulk(request, env) {
   if (body.delete === true) {
     const rows = await db.getImagesByIds(env, ids);
     if (rows.length) {
-      await deleteObjects(env, rows);
+      // 先删行、后删对象：中途断掉残留的只是孤儿对象（重跑可清），
+      // 反过来会出现「有记录没对象」的坏图 —— 与 scripts/backfill-dedup.mjs 的顺序说明同理。
       await db.deleteImages(env, rows.map((r) => r.id));
+      await deleteObjects(env, rows);
     }
     return jsonAdmin({ deleted: rows.length });
   }
@@ -810,12 +868,13 @@ export async function handleBulk(request, env) {
   return jsonAdmin({ updated: changed });
 }
 
-/** DELETE /api/images/:id —— 同时删 R2 对象（原图 + 缩略图）与数据库记录 */
+/** DELETE /api/images/:id —— 同时删数据库记录与 R2 对象（原图 + 缩略图） */
 export async function handleDelete(env, id) {
   const row = await db.getImageById(env, id);
   if (!row) return jsonErr(404, '没有这条记录');
-  await deleteObjects(env, [row]);
+  // 先删行、后删对象（顺序理由见 handleBulk 的删除分支）
   await db.deleteImages(env, [row.id]);
+  await deleteObjects(env, [row]);
   return jsonAdmin({ deleted: 1, key: row.r2_key });
 }
 
@@ -829,7 +888,9 @@ export async function handleThumbUpload(request, env, id) {
   if (!row) return jsonErr(404, '没有这条记录');
 
   const contentType = (request.headers.get('content-type') || '').split(';')[0].trim().toLowerCase() || 'image/webp';
-  if (!contentType.startsWith('image/')) return jsonErr(400, '缩略图必须是图片');
+  // 只收浏览器 canvas 实际产出的三种（与 THUMB_EXT_BY_TYPE 同源）：SVG 当缩略图没有意义，
+  // 反而会把「直链是可执行文档」的风险带进 thumb_key。服务端用不上的类型直接拒收。
+  if (!THUMB_MIME.has(contentType)) return jsonErr(400, '缩略图只支持 webp / jpg / png');
   const limit = Number(env.THUMB_MAX_BYTES) || 2 * 1024 * 1024;
   if (!request.body) return jsonErr(400, '空请求体');
 
@@ -844,6 +905,7 @@ export async function handleThumbUpload(request, env, id) {
 
   await db.setThumbKey(env, id, key);
   const fresh = await db.getImageById(env, id);
+  if (!fresh) return jsonAdmin({ deleted: true }); // 同 handleUpdate：并发删除的窗口里别崩 shape
   return jsonAdmin({ image: shape(fresh, env) });
 }
 
@@ -891,8 +953,9 @@ export async function handleAlbumDelete(url, env) {
   if (!album) return jsonErr(400, '不能删除根目录');
 
   const rows = await db.albumRows(env, album);
-  await deleteObjects(env, rows);
+  // 先删行、后删对象（顺序理由见 handleBulk 的删除分支）
   const changed = await db.deleteAlbumRows(env, album);
+  await deleteObjects(env, rows);
   return jsonAdmin({ deleted: changed, album });
 }
 
@@ -947,9 +1010,31 @@ export async function handleTransfer(request, env) {
     if (!contentType) return jsonErr(400, '目标不是图片（无法识别 Content-Type）');
   }
 
-  const buf = await resp.arrayBuffer();
+  // 声明值只是参考：没有 Content-Length（或对端撒谎）时响应可能无限长 —— 整包
+  // arrayBuffer 会把 isolate 的 128MB 内存吃穿。逐块累计、超限立刻掐断，
+  // 内存占用封顶在 limit + 一个 chunk。
+  let buf;
+  if (resp.body && resp.body.getReader) {
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      if (received > limit) {
+        reader.cancel().catch(() => {});
+        return jsonErr(413, '远程图片超过大小上限');
+      }
+      chunks.push(value);
+    }
+    buf = new Uint8Array(received);
+    let off = 0;
+    for (const c of chunks) { buf.set(c, off); off += c.length; }
+  } else {
+    buf = new Uint8Array(await resp.arrayBuffer());
+  }
   if (!buf.byteLength) return jsonErr(400, '空文件');
-  if (buf.byteLength > limit) return jsonErr(413, '远程图片超过大小上限');
 
   // 分级/相册的校验放在**写 R2 之前**：保留名 400 时对象还没传，不留孤儿。
   // 相册语义与 /api/upload 对齐：不传 = 按日期归档；空串 = 根目录（此前空串会错误回落到日期相册）。
@@ -959,10 +1044,8 @@ export async function handleTransfer(request, env) {
   if (album === null) return jsonErr(400, '_picbed 是保留目录名，不能用作相册');
 
   const key = makeKey(env, filename, contentType);
-  const cacheSeconds = Number(env.IMAGE_CACHE_SECONDS) || 0;
-  const httpMetadata = { contentType };
-  if (cacheSeconds > 0) httpMetadata.cacheControl = `public, max-age=${cacheSeconds}`;
-  await env.BUCKET.put(key, buf, { httpMetadata });
+  // 与单传/分片共用同一套元数据（含 SVG 的 attachment，见 imageHttpMetadata 的说明）
+  await env.BUCKET.put(key, buf, { httpMetadata: imageHttpMetadata(env, contentType) });
 
   const row = {
     r2_key: key,
@@ -1012,7 +1095,12 @@ export async function handlePublicList(request, url, env, ctx) {
 
 async function publicListInner(request, url, env, ctx) {
   const cacheSeconds = Number(env.LIST_CACHE_SECONDS) || 0;
-  const bypass = url.searchParams.get('refresh') === '1';
+  // refresh=1 是强制回源的开关，原来任何人可传 —— 等于给匿名留了个「绕过缓存直打 D1」的口子。
+  // 现在只有带管理密码的请求才生效（公开页从不发密码，访客侧永远走缓存）。
+  // 比较必须走常数时间版：这条路径匿名可达，不能泄漏密码的比较进度。
+  const bypass = url.searchParams.get('refresh') === '1'
+    && !!env.PICBED_PASSWORD
+    && timingSafeEqual(request.headers.get('x-picbed-key') || '', env.PICBED_PASSWORD);
   const useCache = cacheSeconds > 0 && !bypass && request.method === 'GET';
 
   // 缓存键带「列表版本」：版本存在 Cache API 的固定键里（Date.now()），任何增删改成功
@@ -1034,7 +1122,9 @@ async function publicListInner(request, url, env, ctx) {
   }
 
   const { allowed, label } = allowedRatings(url.searchParams.get('rating'), env);
-  const page = intParam(url.searchParams.get('page'), 1, 1, 100000);
+  // 公开侧页码上限压低：LIMIT/OFFSET 深翻页按扫描行数计费（D1），匿名可刷；
+  // 200 页 × 100 张/页已远超单个相册的实际浏览深度。管理列表有密码，不受此限。
+  const page = intParam(url.searchParams.get('page'), 1, 1, 200);
   const pageSize = intParam(url.searchParams.get('pageSize'), 60, 1, 100);
   // 与 /api/images 同一套语义：带 album=（哪怕空串）就精确筛该相册，不传才是不筛
   const albumFilter = url.searchParams.has('album') ? url.searchParams.get('album') || '' : undefined;
