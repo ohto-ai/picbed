@@ -24,6 +24,25 @@ const CORS_PUBLIC = {
   'Access-Control-Max-Age': '86400',
 };
 
+/**
+ * 公开列表缓存的整体失效开关（键固定、值是版本时间戳）。
+ * 缓存键带版本号（见 publicListInner）：bump 一次，老条目不动（TTL 到点自然消失），
+ * 新请求全部换新键回源。在此之前「失效」要枚举 档位×相册×页码 的全部组合，枚举不完。
+ */
+const LIST_VERSION_KEY = new Request('https://picbed-cache.internal/list-version', { method: 'GET' });
+
+/** 任何会改变公开列表的写操作成功后调用（路由层统一挂，见 index.js）。失败静默：大不了缓存多活一个 TTL */
+export async function bumpPublicListVersion() {
+  try {
+    await caches.default.put(
+      LIST_VERSION_KEY,
+      new Response(String(Date.now()), { headers: { 'Cache-Control': 'max-age=86400' } })
+    );
+  } catch (e) {
+    console.error('[picbed] bumpPublicListVersion 失败（不影响响应）:', e);
+  }
+}
+
 export function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -996,9 +1015,20 @@ async function publicListInner(request, url, env, ctx) {
   const bypass = url.searchParams.get('refresh') === '1';
   const useCache = cacheSeconds > 0 && !bypass && request.method === 'GET';
 
+  // 缓存键带「列表版本」：版本存在 Cache API 的固定键里（Date.now()），任何增删改成功
+  // 都 bump 它 —— 老条目不删（TTL 到点自然消失），但新请求全部用新键，必然回源拿到新数据。
+  // 之前的困境是「失效要枚举所有 档位×相册×页码 组合，枚举不完」，版本化让失效变成一次定点写。
+  // 代价：公开请求多一次 Cache API 读（同机房内存级，不占 D1/KV 额度）。
+  let listVersion = '0';
+  if (useCache) {
+    const vHit = await caches.default.match(LIST_VERSION_KEY);
+    if (vHit) listVersion = (await vHit.text()) || '0';
+  }
+
   let cacheKey = null;
   if (useCache) {
-    cacheKey = new Request(url.toString(), { method: 'GET' });
+    const keyed = url.toString() + (url.toString().includes('?') ? '&' : '?') + 'lv=' + listVersion;
+    cacheKey = new Request(keyed, { method: 'GET' });
     const hit = await caches.default.match(cacheKey);
     if (hit) return hit;
   }

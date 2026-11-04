@@ -2706,6 +2706,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     if (dirtyGallery) {
       dirtyGallery = false;
       invalidateListCache();
+      invalidateAlbumTree(); // 上传可能落进新日期相册，目录树要重算
       if (view === 'admin') loadGallery(true);
     }
     // 有图没生成缩略图就说一声：这些图在相册里会直接下载原图，慢得多。
@@ -3620,6 +3621,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       n += r.updated || 0;
     }
     invalidateListCache();
+    invalidateAlbumTree(); // 批量移动/改相册列时，目录树的 DISTINCT 集合也旧了
     return n;
   }
   async function bulkDelete(ids) {
@@ -3629,6 +3631,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       n += r.deleted || 0;
     }
     invalidateListCache();
+    invalidateAlbumTree(); // 批量改相册/删空相册时，目录树的 DISTINCT 集合也旧了
     return n;
   }
 
@@ -3636,6 +3639,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
   async function patchImage(id, patch) {
     const data = await apiSend('/api/images/' + id, 'PATCH', patch);
     invalidateListCache();
+    invalidateAlbumTree();
     const image = data && data.image;
     if (image) {
       // ⚠️ 必须**就地更新** itemsByKey 里那一行，不能换成接口返回的新对象：
@@ -3980,9 +3984,12 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
     return mode === 'public' ? `pub|${publicRatingParam()}|${album}` : `adm|${album}`;
   }
 
-  /** 列表内容指纹：只取「变了就该重画」的那几列 */
-  function listSig(images) {
-    return images.map((r) => [r.id, r.rating, r.is_hidden, r.filename, r.thumb_url || ''].join('\u0001')).join('\u0002');
+  /** 列表内容指纹：图片取「变了就该重画」的那几列；folders 也进指纹——
+      别的设备新建/删除子相册时，图片和 total 可能都没变，只差 folders */
+  function listSig(data) {
+    const img = (data.images || []).map((r) => [r.id, r.rating, r.is_hidden, r.filename, r.thumb_url || ''].join('\u0001')).join('\u0002');
+    const fol = (data.folders || []).map((f) => [f.album, f.n].join('\u0001')).join('\u0002');
+    return img + '\u0003' + fol;
   }
 
   function invalidateListCache() { listCache.clear(); }
@@ -4002,7 +4009,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       total: data.total || 0,
       folders: data.folders || [],
       images: data.images || [],
-      sig: listSig(data.images || []),
+      sig: listSig(data),
     });
   }
 
@@ -4079,7 +4086,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       if (reset) {
         cacheList('admin', album, data);
         // 和缓存那份一模一样就一个节点都不碰：重画会让每张缩略图重新闪一次骨架
-        if (!cached || cached.sig !== listSig(items) || cached.total !== (data.total || 0)) {
+        if (!cached || cached.sig !== listSig(data) || cached.total !== (data.total || 0)) {
           $('galleryGrid').textContent = '';
           dlCancelAll();
           renderList('admin', data);
@@ -4163,7 +4170,7 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       const files = data.images || [];
       if (reset) {
         cacheList('public', curAlbum, data);
-        if (!cached || cached.sig !== listSig(files) || cached.total !== (data.total || 0)) {
+        if (!cached || cached.sig !== listSig(data) || cached.total !== (data.total || 0)) {
           $('galleryGrid').textContent = '';
           dlCancelAll();
           renderList('public', data);
@@ -5673,6 +5680,8 @@ html[data-crt] #crtLayer { display: block; position: fixed; inset: 0; z-index: 2
       saveHistory(image.url, image.filename);
       // 转存的图没有缩略图（服务端生成不了），会进「批量补缩略图」的队列
       remember(image);
+      invalidateListCache();
+      invalidateAlbumTree();
       loadGallery(true);
     } catch (e) {
       toast(e.message, true);

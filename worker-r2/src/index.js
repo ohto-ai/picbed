@@ -26,6 +26,7 @@
 import ADMIN_HTML from './admin.html';
 import {
   CORS_PUBLIC,
+  bumpPublicListVersion,
   json,
   jsonErr,
   requireAuth,
@@ -225,6 +226,16 @@ export default {
         } else {
           res = jsonErr(404, 'Not Found');
         }
+
+        // 会改公开列表的写操作成功后，bump 列表缓存版本 —— 边缘缓存随即整体失效，
+        // 访客最多看到「写之前那一瞬间」的数据，而不是整个 TTL 的旧数据。
+        // begin/part/abort 不在此列：它们只动分片会话，不改任何一张图。
+        const listTouching = method !== 'GET' && !(
+          pathname === '/api/upload/begin'
+          || pathname === '/api/upload/part'
+          || pathname === '/api/upload/abort'
+        );
+        if (listTouching && res.ok) ctx.waitUntil(bumpPublicListVersion());
 
         return withCors(request, env, res);
       }
