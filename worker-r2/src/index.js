@@ -179,7 +179,13 @@ export default {
       // ---- 以下都要密码 ----
       if (pathname.startsWith('/api/')) {
         const denied = requireAuth(request, env);
-        if (denied) return withCors(request, env, denied);
+        if (denied) {
+          // 密码错误拖 1.5 秒再回：在线爆破的成本从「每秒几百次」变成「每次至少 1.5 秒」，
+          // 正常用户一年碰不到这条路径（密码对了零延迟）。setTimeout 等待不占 CPU，
+          // 免费版 10ms CPU 限额不受影响。
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          return withCors(request, env, denied);
+        }
 
         const one = /^\/api\/images\/(\d+)$/.exec(pathname);
         const thumb = /^\/api\/images\/(\d+)\/thumb$/.exec(pathname);
