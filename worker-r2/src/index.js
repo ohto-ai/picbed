@@ -51,8 +51,8 @@ import {
 /**
  * 跨域头：只放行 ALLOWED_ORIGINS 里列出的来源。
  *
- * 前端在 GitHub Pages 上、Worker 在另一个域名，属于跨域；但管理接口默认**不发光 CORS 头**
- * （不给任何站点跨站读取的机会）。只有白名单里的来源才拿到头。
+ * 站点在 img.ohtoai.top（R2 自定义域）、Worker 在 picbed-worker.ohtoai.top，属于跨域；
+ * 但管理接口默认**不发光 CORS 头**（不给任何站点跨站读取的机会）。只有白名单里的来源才拿到头。
  * 刻意不带 Access-Control-Allow-Credentials —— 不用 Cookie，密码靠 x-picbed-key 显式携带。
  */
 function corsFor(request, env) {
@@ -63,10 +63,24 @@ function corsFor(request, env) {
     .map((s) => s.trim())
     .filter(Boolean);
   if (!allowed.includes(origin)) return null;
+
+  // 允许的头 = 基础名单 + 浏览器在预检里声明的头（ACRH）。
+  //
+  // 曾经这里写死过 'Content-Type, X-Picbed-Key, X-Filename'，后来单传加了
+  // x-sha256（内容指纹查重）却忘了同步 —— 所有带指纹的上传都在预检阶段被
+  // 浏览器拦死，请求根本发不出去。反射 ACRH 可以让这类「前端加了个头、
+  // Worker 没跟上」的漂移自动生效；而且只有 ALLOWED_ORIGINS 里的来源才拿得到
+  // 任何 CORS 头，这些站点本来就能发任意请求头，反射不多给任何能力。
+  const requested = (request.headers.get('access-control-request-headers') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allowHeaders = [...new Set(['Content-Type', 'X-Picbed-Key', 'X-Filename', 'X-Sha256', ...requested])];
+
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Picbed-Key, X-Filename',
+    'Access-Control-Allow-Headers': allowHeaders.join(', '),
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };

@@ -202,7 +202,8 @@ node scripts/backfill-dedup.mjs --apply  # 按报告真删（D1 行 + R2 原图/
 
 **CORS**：公开接口对所有来源放行；管理接口只对 `ALLOWED_ORIGINS` 里列出的来源发光 CORS 头
 （唯一域名 + 一个别名 picbed.ohtoai.top + Pages 镜像，其余一律不给），身份靠 `x-picbed-key` 头而不是 Cookie，
-所以不带 credentials。
+所以不带 credentials。预检时**把浏览器声明的请求头（ACRH）原样反射回去**，前端新增自定义头（如 `x-sha256`）
+不用再同步 Worker 里的白名单 —— 曾经写死的名单漏掉 `x-sha256`，导致带指纹的上传全部卡在预检。
 
 站点与图片现在同源，**前端读图不再需要桶的 CORS**；`r2-cors.json` 留下的用途是别名域名
 （301 生效前的那些请求）与第三方跨域取图。与 `ALLOWED_ORIGINS` 保持同一份名单是既定规矩。
@@ -275,7 +276,7 @@ npx wrangler d1 execute picbed-db --remote --command="ALTER TABLE images ADD COL
 | 改了 schema 但 `wrangler dev` 里没生效 | 重启 `wrangler dev`（miniflare 会缓存数据库连接） |
 | 管理接口报 503 | 没设 `PICBED_PASSWORD`（故意 fail closed，不是 bug）。本地开发时在 `worker-r2/.dev.vars` 里写 `PICBED_PASSWORD="dev"` 再重启 dev |
 | 部署时 `custom_domain` 绑定失败 | `img.ohtoai.top` 在 DNS 里已有记录，先删掉那条 |
-| 上传报 CORS 错 | 管理页是同源的，不该有 CORS 问题；若从前端别的域名调管理接口，需要自己加 CORS 头 |
+| 上传报 CORS 错（`Request header field … is not allowed by Access-Control-Allow-Headers`） | 页面在 `img.ohtoai.top`、API 在 `picbed-worker.ohtoai.top`，本来就跨域，靠 `ALLOWED_ORIGINS` 白名单放行。先确认页面来源在名单里；请求头现在由预检自动反射，若仍报某个头被拒，多半是 Worker 还没部署到带反射逻辑的版本 |
 | 前端 `fetch` 读图报 CORS | 线上页面与图片**同源**，正常不该出现。若在 Pages 镜像或别名域名上遇到，是那条来源不在桶的 CORS 名单里（`wrangler r2 bucket cors set` 重配）；`<img>` 标签不受影响 |
 | 偶发 CORS 报错、刷新又好了（历史问题，已修） | 跨域时代的老毛病：R2 只在请求带 `Origin` 时才回 `Access-Control-Allow-Origin` 与 `Vary: Origin`，不带 Origin 的那份缓存副本两个头都没有，而「没有 Vary」对任何请求都算命中 —— 于是 `fetch` 偶尔读到那份没有 ACAO 的副本。页面搬到桶域名上之后同源了，这条路不再存在 |
 | 上传 413 | 超过 `MAX_UPLOAD_BYTES`；Workers 免费版请求体上限 100MB，别设得太接近 |
